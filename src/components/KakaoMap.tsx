@@ -36,11 +36,15 @@ function haversineKm(a: [number, number], b: [number, number]): number {
 
 function getDistanceMarkers(
   coords: [number, number][]
-): { point: [number, number]; label: string }[] {
+): { point: [number, number]; label: string; kind: "start" | "km" | "end" }[] {
   if (coords.length < 2) return [];
-  const markers: { point: [number, number]; label: string }[] = [
-    { point: coords[0], label: "출발" },
-  ];
+  const startPt = coords[0];
+  const endPt = coords[coords.length - 1];
+  const markers: {
+    point: [number, number];
+    label: string;
+    kind: "start" | "km" | "end";
+  }[] = [{ point: startPt, label: "출발", kind: "start" }];
   let accum = 0;
   let nextKm = 1;
   for (let i = 1; i < coords.length; i++) {
@@ -49,18 +53,21 @@ function getDistanceMarkers(
     const seg = haversineKm(prev, curr);
     while (accum + seg >= nextKm && seg > 0) {
       const t = (nextKm - accum) / seg;
-      markers.push({
-        point: [
-          prev[0] + (curr[0] - prev[0]) * t,
-          prev[1] + (curr[1] - prev[1]) * t,
-        ],
-        label: `${nextKm}km`,
-      });
+      const pt: [number, number] = [
+        prev[0] + (curr[0] - prev[0]) * t,
+        prev[1] + (curr[1] - prev[1]) * t,
+      ];
+      if (
+        haversineKm(pt, startPt) >= 0.35 &&
+        haversineKm(pt, endPt) >= 0.45
+      ) {
+        markers.push({ point: pt, label: `${nextKm}km`, kind: "km" });
+      }
       nextKm += 1;
     }
     accum += seg;
   }
-  markers.push({ point: coords[coords.length - 1], label: "도착" });
+  markers.push({ point: endPt, label: "도착", kind: "end" });
   return markers;
 }
 
@@ -241,42 +248,24 @@ export default function KakaoMap({
       objectsRef.current.push(polyline);
 
       if (isSelected) {
-        let topPt = course.coordinates[0];
-        for (const pt of course.coordinates) {
-          if (pt[0] > topPt[0]) topPt = pt;
-        }
-        const titlePill = document.createElement("div");
-        titlePill.className = "km-marker-badge";
-        titlePill.style.borderColor = color;
-        titlePill.style.color = "#0f172a";
-        titlePill.style.padding = "3px 9px";
-        titlePill.style.fontSize = "11px";
-        titlePill.textContent = `${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥`;
-
-        const titleOverlay = new kakao.CustomOverlay({
-          position: new kakao.LatLng(topPt[0], topPt[1]),
-          content: titlePill,
-          xAnchor: 0.5,
-          yAnchor: 1.85,
-          zIndex: 6,
-        });
-        titleOverlay.setMap(map);
-        objectsRef.current.push(titleOverlay);
-
         const markers = getDistanceMarkers(course.coordinates);
-        markers.forEach((dm, idx) => {
-          const isEndpoint = idx === 0 || idx === markers.length - 1;
+        markers.forEach((dm) => {
+          const isEndpoint = dm.kind !== "km";
           const badge = document.createElement("div");
           badge.className = "km-marker-badge";
           badge.style.borderColor = isEndpoint ? color : "#cbd5e1";
           badge.style.color = isEndpoint ? color : "#0f172a";
           badge.textContent = dm.label;
 
+          const xAnchor = dm.kind === "km" ? -0.25 : 0.5;
+          const yAnchor =
+            dm.kind === "start" ? 1.45 : dm.kind === "end" ? -0.45 : 0.5;
+
           const overlay = new kakao.CustomOverlay({
             position: new kakao.LatLng(dm.point[0], dm.point[1]),
             content: badge,
-            xAnchor: -0.22,
-            yAnchor: 0.5,
+            xAnchor,
+            yAnchor,
             zIndex: isEndpoint ? 5 : 4,
           });
           overlay.setMap(map);
@@ -296,8 +285,8 @@ export default function KakaoMap({
         activeCourse.coordinates.forEach(([lat, lng]) =>
           bounds.extend(new kakao.LatLng(lat, lng))
         );
-        // Generous top/side padding so course title & km labels never clip at map edges
-        map.setBounds(bounds, 105, 115, 70, 115);
+        // Generous padding so start/end/km labels never clip or crowd near edges
+        map.setBounds(bounds, 85, 130, 85, 130);
       }
     }
   }, [sdkReady, courses, selectedRegionId, selectedCourseId, onSelectCourse]);

@@ -414,6 +414,24 @@ ${trkpts}
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-3 py-1.5 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${activeBadge.dot}`}
+              />
+              <span className="font-semibold text-[#0f172a] truncate">
+                {activeCourse.variant.name}
+              </span>
+              <span className="text-[#64748b] shrink-0">
+                {activeCourse.variant.distanceKm.toFixed(1)}km
+              </span>
+            </div>
+            <span className="font-bold text-[#0f172a] tabular-nums shrink-0">
+              {selectedHour}시 {activeCourse.pmAtHour.toFixed(1)} ㎍/㎥ ·{" "}
+              <span className={activeBadge.text}>{activeBadge.label}</span>
+            </span>
+          </div>
+
           {useKakao ? (
             <KakaoMap
               kakaoKey={ENV_KAKAO_KEY}

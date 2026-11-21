@@ -52,11 +52,15 @@ function haversineKm(a: [number, number], b: [number, number]): number {
 
 function getDistanceMarkers(
   coords: [number, number][]
-): { point: [number, number]; label: string }[] {
+): { point: [number, number]; label: string; kind: "start" | "km" | "end" }[] {
   if (coords.length < 2) return [];
-  const markers: { point: [number, number]; label: string }[] = [
-    { point: coords[0], label: "출발" },
-  ];
+  const startPt = coords[0];
+  const endPt = coords[coords.length - 1];
+  const markers: {
+    point: [number, number];
+    label: string;
+    kind: "start" | "km" | "end";
+  }[] = [{ point: startPt, label: "출발", kind: "start" }];
 
   let accum = 0;
   let nextKm = 1;
@@ -67,15 +71,22 @@ function getDistanceMarkers(
     const seg = haversineKm(prev, curr);
     while (accum + seg >= nextKm && seg > 0) {
       const t = (nextKm - accum) / seg;
-      const lat = prev[0] + (curr[0] - prev[0]) * t;
-      const lng = prev[1] + (curr[1] - prev[1]) * t;
-      markers.push({ point: [lat, lng], label: `${nextKm}km` });
+      const pt: [number, number] = [
+        prev[0] + (curr[0] - prev[0]) * t,
+        prev[1] + (curr[1] - prev[1]) * t,
+      ];
+      if (
+        haversineKm(pt, startPt) >= 0.35 &&
+        haversineKm(pt, endPt) >= 0.45
+      ) {
+        markers.push({ point: pt, label: `${nextKm}km`, kind: "km" });
+      }
       nextKm += 1;
     }
     accum += seg;
   }
 
-  markers.push({ point: coords[coords.length - 1], label: "도착" });
+  markers.push({ point: endPt, label: "도착", kind: "end" });
   return markers;
 }
 
@@ -175,24 +186,9 @@ export default function LeafletMap({
       });
 
       if (isSelected) {
-        let topPt = course.coordinates[0];
-        for (const pt of course.coordinates) {
-          if (pt[0] > topPt[0]) topPt = pt;
-        }
-        L.marker(topPt, {
-          interactive: false,
-          zIndexOffset: 500,
-          icon: L.divIcon({
-            className: "",
-            html: `<div class="km-marker-badge" style="display:inline-block;transform:translate(-50%,calc(-100% - 12px));border-color:${color};padding:3px 9px;font-size:11px;">${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥</div>`,
-            iconSize: [0, 0],
-            iconAnchor: [0, 0],
-          }),
-        }).addTo(group);
-
         const distMarkers = getDistanceMarkers(course.coordinates);
-        distMarkers.forEach((dm, idx) => {
-          const isEndpoint = idx === 0 || idx === distMarkers.length - 1;
+        distMarkers.forEach((dm) => {
+          const isEndpoint = dm.kind !== "km";
           L.circleMarker(dm.point, {
             radius: isEndpoint ? 6 : 4,
             color: "#ffffff",
@@ -201,15 +197,35 @@ export default function LeafletMap({
             fillOpacity: 1,
           }).addTo(group);
 
-          L.marker(dm.point, {
-            interactive: false,
-            icon: L.divIcon({
-              className: "",
-              html: `<div class="km-marker-badge" style="border-color:${isEndpoint ? color : "#cbd5e1"};color:${isEndpoint ? color : "#0f172a"};">${dm.label}</div>`,
-              iconSize: [44, 18],
-              iconAnchor: [-10, 9],
-            }),
-          }).addTo(group);
+          const borderColor = isEndpoint ? color : "#cbd5e1";
+          const textColor = isEndpoint ? color : "#0f172a";
+
+          if (dm.kind === "start" || dm.kind === "end") {
+            const transform =
+              dm.kind === "start"
+                ? "translate(-50%,calc(-100% - 10px))"
+                : "translate(-50%,10px)";
+            L.marker(dm.point, {
+              interactive: false,
+              zIndexOffset: 500,
+              icon: L.divIcon({
+                className: "",
+                html: `<div class="km-marker-badge" style="display:inline-block;transform:${transform};border-color:${borderColor};color:${textColor};">${dm.label}</div>`,
+                iconSize: [0, 0],
+                iconAnchor: [0, 0],
+              }),
+            }).addTo(group);
+          } else {
+            L.marker(dm.point, {
+              interactive: false,
+              icon: L.divIcon({
+                className: "",
+                html: `<div class="km-marker-badge" style="border-color:${borderColor};color:${textColor};">${dm.label}</div>`,
+                iconSize: [44, 18],
+                iconAnchor: [-10, 9],
+              }),
+            }).addTo(group);
+          }
         });
       }
     });
@@ -223,8 +239,8 @@ export default function LeafletMap({
       if (activeCourse && activeCourse.coordinates.length > 0) {
         const bounds = L.latLngBounds(activeCourse.coordinates);
         map.fitBounds(bounds, {
-          paddingTopLeft: [115, 105],
-          paddingBottomRight: [115, 70],
+          paddingTopLeft: [130, 85],
+          paddingBottomRight: [130, 85],
           maxZoom: 14,
           animate: true,
         });
