@@ -4,15 +4,11 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import {
   ArrowRight,
-  Wind,
   Clock,
-  AlertTriangle,
-  CheckCircle2,
-  Info,
   KeyRound,
   Download,
-  Mountain,
-  TrendingUp,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { REGIONS, type CourseVariant } from "@/lib/courses";
 import {
@@ -31,7 +27,7 @@ type ExtendedMapProvider = MapProvider | "kakao";
 const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
+    <div className="w-full h-[460px] sm:h-[520px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
       지도를 불러오는 중입니다...
     </div>
   ),
@@ -40,7 +36,7 @@ const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
 const KakaoMap = dynamic(() => import("@/components/KakaoMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
+    <div className="w-full h-[460px] sm:h-[520px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
       카카오맵을 불러오는 중입니다...
     </div>
   ),
@@ -71,7 +67,7 @@ const STATUS_BADGE: Record<
     border: "border-[#fde68a]",
   },
   danger: {
-    label: "역전 정체 위험",
+    label: "역전 위험",
     dot: "bg-[#dc2626]",
     bg: "bg-[#fef2f2]",
     text: "text-[#b91c1c]",
@@ -131,6 +127,7 @@ export default function CourseMapTab({
   const [selectedCourseId, setSelectedCourseId] = useState<string>(
     "dongducheon-sincheon"
   );
+  const [showModelDetail, setShowModelDetail] = useState<boolean>(false);
 
   const [storedProvider, setStoredProvider] = useStoredValue(
     "nr_map_provider",
@@ -241,7 +238,6 @@ export default function CourseMapTab({
         };
       });
 
-      // Rank courses at the selected hour: safe first, then lowest PM2.5
       const rankedCourses = [...computedCourses].sort((a, b) => {
         const order = { safe: 0, caution: 1, danger: 2 };
         if (order[a.status] !== order[b.status]) {
@@ -250,7 +246,6 @@ export default function CourseMapTab({
         return a.pmAtHour - b.pmAtHour;
       });
 
-      // Region pill dot reflects worst status of default/first route in region
       const primaryCourseStatus = computedCourses[0]?.status ?? "safe";
 
       return {
@@ -342,23 +337,23 @@ ${trkpts}
   return (
     <div className="space-y-4">
       {/* Top Control Bar: Hour Slider + 6 Region Buttons */}
-      <div className="bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-4 space-y-4">
+      <div className="bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-4">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           {/* Hour Slider */}
           <div className="flex-1 max-w-xl space-y-1.5">
             <div className="flex items-center justify-between text-xs">
               <span className="inline-flex items-center gap-1.5 font-semibold text-[#0f172a]">
                 <Clock className="w-3.5 h-3.5 text-[#475569]" />
-                관측 및 러닝 시각 선택
+                러닝 시각 선택
               </span>
-              <span className="font-semibold text-[#0f172a] tabular-nums">
-                {selectedHour}시{" "}
-                <span className="font-normal text-[#64748b]">
+              <span className="font-bold text-[#0f172a] tabular-nums">
+                {selectedHour}시
+                <span className="ml-1.5 font-normal text-[#64748b]">
                   {selectedHour <= 16
-                    ? "(주간 대기 혼합 시간대)"
+                    ? "주간 (공기 순환)"
                     : selectedHour <= 19
-                    ? "(일몰 전후 전환 시간대)"
-                    : "(야간 역전층 주의 시간대)"}
+                    ? "일몰 전후"
+                    : "야간 역전 주의"}
                 </span>
               </span>
             </div>
@@ -373,12 +368,10 @@ ${trkpts}
               aria-label="시간대 선택 (14시~23시)"
             />
             <div className="flex justify-between text-[11px] text-[#64748b] tabular-nums">
-              <span>14시</span>
-              <span>16시</span>
-              <span>18시</span>
-              <span>20시</span>
+              <span>14시 (낮)</span>
+              <span>18시 (일몰)</span>
               <span className="font-semibold text-[#0f172a]">
-                21~22시 (역전 피크)
+                21~22시 (야간 피크)
               </span>
               <span>23시</span>
             </div>
@@ -387,7 +380,7 @@ ${trkpts}
           {/* 6 Region Buttons */}
           <div className="space-y-1.5">
             <div className="text-xs font-semibold text-[#475569]">
-              권역별 코스 선택 ({activeRegionMetric.courses.length}개 노선)
+              지역 선택
             </div>
             <div className="flex flex-wrap gap-1.5">
               {regionMetrics.map(({ region, primaryCourseStatus }) => {
@@ -414,15 +407,15 @@ ${trkpts}
         </div>
       </div>
 
-      {/* Main Split: Left Map + Right Inspection Panel */}
+      {/* Main Split: Left Map + Right Clean Decision Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* Left: Map & Map Engine Switcher */}
+        {/* Left: Map */}
         <div className="lg:col-span-7 bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-3 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <div className="text-xs font-semibold text-[#0f172a]">
-              {activeRegionMetric.region.label} 권역 코스 지도
+              {activeRegionMetric.region.label} 코스 지도
               <span className="ml-2 font-normal text-[#64748b]">
-                ({activeRegionMetric.region.terrainSummary})
+                {activeRegionMetric.region.terrainSummary}
               </span>
             </div>
 
@@ -431,9 +424,9 @@ ${trkpts}
                 {(
                   [
                     ["kakao", "카카오맵"],
-                    ["osm", "기본(OSM)"],
-                    ["vworld-base", "브이월드 일반"],
-                    ["vworld-hybrid", "브이월드 위성"],
+                    ["osm", "기본 지도"],
+                    ["vworld-base", "브이월드"],
+                    ["vworld-hybrid", "위성"],
                     ["maptiler-positron", "MapTiler"],
                   ] as [ExtendedMapProvider, string][]
                 ).map(([key, label]) => (
@@ -467,7 +460,7 @@ ${trkpts}
             <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-3 space-y-2.5 text-xs">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-[#0f172a]">
-                  정밀 지도 API 키 설정 (브라우저 로컬 저장)
+                  지도 API 키 설정
                 </span>
                 <button
                   type="button"
@@ -479,8 +472,8 @@ ${trkpts}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <label className="space-y-1">
-                  <span className="block text-[11px] font-medium text-[#0f172a]">
-                    카카오맵 JavaScript 키 (권장)
+                  <span className="block text-[11px] text-[#475569]">
+                    카카오맵 JavaScript 키
                   </span>
                   <input
                     type="text"
@@ -488,13 +481,13 @@ ${trkpts}
                     onChange={(e) =>
                       handleSaveKeys(e.target.value, vworldKey, maptilerKey)
                     }
-                    placeholder="카카오 JavaScript 앱 키 입력"
+                    placeholder="JavaScript 키 입력"
                     className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
                   />
                 </label>
                 <label className="space-y-1">
                   <span className="block text-[11px] text-[#475569]">
-                    국토교통부 브이월드(VWORLD) 키
+                    브이월드(VWORLD) 키
                   </span>
                   <input
                     type="text"
@@ -502,13 +495,13 @@ ${trkpts}
                     onChange={(e) =>
                       handleSaveKeys(kakaoKey, e.target.value, maptilerKey)
                     }
-                    placeholder="브이월드 인증키 입력 (선택)"
+                    placeholder="선택 입력"
                     className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
                   />
                 </label>
                 <label className="space-y-1">
                   <span className="block text-[11px] text-[#475569]">
-                    MapTiler Positron 키
+                    MapTiler 키
                   </span>
                   <input
                     type="text"
@@ -516,20 +509,17 @@ ${trkpts}
                     onChange={(e) =>
                       handleSaveKeys(kakaoKey, vworldKey, e.target.value)
                     }
-                    placeholder="MapTiler API 키 입력 (선택)"
+                    placeholder="선택 입력"
                     className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
                   />
                 </label>
               </div>
-              <p className="text-[11px] text-[#64748b] leading-relaxed">
-                카카오 디벨로퍼스 앱의 <strong>JavaScript 키</strong>를 입력하고 Web 도메인을 등록하면 즉시 한국 정밀 지도로 전환됩니다.
-              </p>
             </div>
           )}
 
           {needsMissingKeyWarning && (
             <div className="rounded-md border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] text-[#b45309]">
-              선택한 지도 엔진의 API 키가 아직 입력되지 않아 기본 OpenStreetMap 지도로 표시 중입니다.
+              선택한 지도의 API 키가 비어 있어 기본 지도로 표시 중입니다.
             </div>
           )}
 
@@ -563,7 +553,7 @@ ${trkpts}
 
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-[11px] text-[#64748b]">
-              실선은 선택 코스(1km 거리 표식 포함), 점선은 권역 내 대안 코스입니다.
+              실선: 현재 선택한 코스 · 점선: 같은 지역 다른 코스
             </p>
             <div className="flex items-center gap-3 text-xs text-[#475569]">
               <span className="inline-flex items-center gap-1">
@@ -576,22 +566,22 @@ ${trkpts}
               </span>
               <span className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#dc2626]" />
-                역전 정체 위험
+                역전 위험
               </span>
             </div>
           </div>
         </div>
 
-        {/* Right: Ranked Courses + Selected Course Detail + Regression Prediction */}
+        {/* Right: Scannable 4-Block Summary Panel */}
         <div className="lg:col-span-5 bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-4 space-y-4">
-          {/* Dynamic Time-Based Ranked Course Selector */}
+          {/* 1. Ranked Course List */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-[#0f172a]">
-                {selectedHour}시 기준 {activeRegionMetric.region.label} 코스 추천 순위
+              <span className="font-bold text-[#0f172a]">
+                {selectedHour}시 추천 코스 순위
               </span>
               <span className="text-[11px] text-[#64748b]">
-                안전 우선 정렬
+                숫자는 미세먼지(㎍/㎥)
               </span>
             </div>
             <div className="space-y-1.5">
@@ -613,7 +603,9 @@ ${trkpts}
                       <span className="text-[11px] font-bold text-[#64748b] w-8 shrink-0">
                         {idx + 1}순위
                       </span>
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${badge.dot}`} />
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${badge.dot}`}
+                      />
                       <span className="text-xs font-semibold text-[#0f172a] truncate">
                         {c.variant.name}
                       </span>
@@ -632,279 +624,218 @@ ${trkpts}
             </div>
           </div>
 
-          {/* Selected Course Header */}
-          <div className="flex items-start justify-between gap-3 pt-2 pb-3 border-t border-b border-[#e2e8f0]">
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-[#64748b]">
-                <span>
-                  측정소: {activeRegionMetric.region.stationName} ·{" "}
-                  {activeCourse.variant.distanceKm.toFixed(1)} km
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <Mountain className="w-3 h-3" />
+          {/* 2. Selected Course Verdict + 3 Core Numbers */}
+          <div className="pt-3 border-t border-[#e2e8f0] space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-[#0f172a]">
+                  {activeCourse.variant.name}
+                </h2>
+                <p className="text-xs text-[#64748b] mt-0.5">
+                  {activeCourse.variant.distanceKm.toFixed(1)} km ·{" "}
                   {activeCourse.variant.elevationNote}
-                </span>
+                </p>
               </div>
-              <h2 className="text-base font-bold text-[#0f172a]">
-                {activeCourse.variant.name}
-              </h2>
-              <p className="text-xs text-[#475569]">
-                {activeCourse.variant.terrainNote}
-              </p>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${activeBadge.bg} ${activeBadge.text} ${activeBadge.border}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${activeBadge.dot}`} />
+                  {activeBadge.label}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleDownloadGpx}
+                  title="GPX 경로 파일 저장"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#f1f5f9] text-[11px] font-medium text-[#334155]"
+                >
+                  <Download className="w-3 h-3" />
+                  GPX
+                </button>
+              </div>
             </div>
-            <span
-              className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${activeBadge.bg} ${activeBadge.text} ${activeBadge.border}`}
-            >
-              <span className={`w-2 h-2 rounded-full ${activeBadge.dot}`} />
-              {activeBadge.label}
-            </span>
-          </div>
 
-          {/* 14시 vs 22시 PM2.5 Comparison */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-[#475569]">
-                초미세먼지(PM2.5) 시간대 비교
-              </span>
-              <button
-                type="button"
-                onClick={handleDownloadGpx}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#f1f5f9] text-[11px] font-medium text-[#334155]"
-              >
-                <Download className="w-3 h-3" />
-                GPX 다운로드
-              </button>
-            </div>
+            {/* 3 Crystal-Clear Core Metrics */}
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-2.5">
-                <div className="text-[11px] text-[#64748b]">낮 14시</div>
-                <div className="text-base font-bold text-[#0f172a] tabular-nums mt-0.5">
-                  {activeCourse.pm14.toFixed(1)}
-                  <span className="text-[11px] font-normal text-[#64748b] ml-0.5">
-                    ㎍/㎥
-                  </span>
+                <div className="text-[11px] text-[#64748b]">
+                  {selectedHour}시 미세먼지
                 </div>
-              </div>
-              <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-2.5">
-                <div className="text-[11px] text-[#64748b]">밤 22시</div>
                 <div
-                  className={`text-base font-bold tabular-nums mt-0.5 ${
-                    activeCourse.isInversion
+                  className={`text-lg font-bold tabular-nums mt-0.5 ${
+                    activeCourse.status === "danger"
                       ? "text-[#dc2626]"
+                      : activeCourse.status === "caution"
+                      ? "text-[#d97706]"
                       : "text-[#16a34a]"
                   }`}
                 >
-                  {activeCourse.pm22.toFixed(1)}
-                  <span className="text-[11px] font-normal text-[#64748b] ml-0.5">
-                    ㎍/㎥
-                  </span>
-                </div>
-              </div>
-              <div className="rounded-md border border-[#e2e8f0] bg-[#ffffff] p-2.5">
-                <div className="text-[11px] text-[#64748b]">
-                  선택({selectedHour}시)
-                </div>
-                <div className="text-base font-bold text-[#0f172a] tabular-nums mt-0.5">
                   {activeCourse.pmAtHour.toFixed(1)}
                   <span className="text-[11px] font-normal text-[#64748b] ml-0.5">
                     ㎍/㎥
                   </span>
                 </div>
-              </div>
-            </div>
-
-            {/* 14h~23h Mini Bar Strip */}
-            <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-2.5 py-2 space-y-1">
-              <div className="flex justify-between text-[10px] text-[#64748b]">
-                <span>14시~23시 코스 농도 변화 (막대 클릭 시 시각 이동)</span>
-                <span className="tabular-nums">기준선 35 ㎍/㎥</span>
-              </div>
-              <div className="grid grid-cols-10 gap-1 items-end h-10 pt-1">
-                {activeCourse.eveningSeries.map((pt) => {
-                  const pct = Math.min(100, Math.max(12, (pt.pm25 / 60) * 100));
-                  const barColor =
-                    pt.pm25 >= 35
-                      ? "bg-[#dc2626]"
-                      : pt.pm25 >= 24
-                      ? "bg-[#d97706]"
-                      : "bg-[#16a34a]";
-                  const isCur = pt.hour === selectedHour;
-                  return (
-                    <button
-                      key={pt.hour}
-                      type="button"
-                      onClick={() => setSelectedHour(pt.hour)}
-                      title={`${pt.hour}시: ${pt.pm25.toFixed(1)} ㎍/㎥`}
-                      className="flex flex-col items-center justify-end h-full group"
-                    >
-                      <div
-                        className={`w-full rounded-t-xs transition-all ${barColor} ${
-                          isCur
-                            ? "opacity-100 ring-1 ring-[#0f172a]"
-                            : "opacity-55 group-hover:opacity-85"
-                        }`}
-                        style={{ height: `${pct}%` }}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="grid grid-cols-10 gap-1 text-center text-[10px] text-[#64748b] tabular-nums">
-                {activeCourse.eveningSeries.map((pt) => (
-                  <span
-                    key={pt.hour}
-                    className={
-                      pt.hour === selectedHour
-                        ? "font-bold text-[#0f172a]"
-                        : ""
-                    }
-                  >
-                    {pt.hour}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Multiple Regression Inversion Prediction Card */}
-          <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-3 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 font-semibold text-[#0f172a]">
-                <TrendingUp className="w-3.5 h-3.5 text-[#475569]" />
-                22시 야간 역전 예측 (다중회귀 모델)
-              </span>
-              <span className="text-[11px] text-[#64748b] tabular-nums">
-                오차 MAE {modelMetrics.mae.toFixed(1)} ㎍/㎥ · R²{" "}
-                {modelMetrics.rSquared.toFixed(2)}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded border border-[#e2e8f0] bg-[#ffffff] px-2.5 py-2">
-                <div className="text-[11px] text-[#64748b]">예상 22시 농도</div>
-                <div className="text-sm font-bold text-[#0f172a] tabular-nums">
-                  {activeCourse.predictedPm22.toFixed(1)} ㎍/㎥
+                <div className="text-[11px] text-[#64748b] tabular-nums mt-0.5">
+                  낮 {activeCourse.pm14.toFixed(0)} → 밤{" "}
+                  {activeCourse.pm22.toFixed(0)}
                 </div>
               </div>
-              <div className="rounded border border-[#e2e8f0] bg-[#ffffff] px-2.5 py-2">
-                <div className="text-[11px] text-[#64748b]">역전 발생 확률</div>
+
+              <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-2.5">
+                <div className="text-[11px] text-[#64748b]">역전 · 바람</div>
                 <div
-                  className={`text-sm font-bold tabular-nums ${
-                    activeCourse.inversionProbPct >= 60
-                      ? "text-[#dc2626]"
-                      : activeCourse.inversionProbPct >= 35
-                      ? "text-[#d97706]"
-                      : "text-[#16a34a]"
-                  }`}
-                >
-                  {activeCourse.inversionProbPct}%
-                </div>
-              </div>
-            </div>
-            {activeRegionMetric.stationPrediction && (
-              <p className="text-[11px] text-[#475569]">
-                주요 기여 요인:{" "}
-                <strong className="text-[#0f172a]">
-                  {activeRegionMetric.stationPrediction.topFactor}
-                </strong>
-              </p>
-            )}
-          </div>
-
-          {/* Wind Speed & Inversion Status */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="rounded-md border border-[#e2e8f0] bg-[#ffffff] p-3 flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-[11px] text-[#64748b] inline-flex items-center gap-1">
-                  <Wind className="w-3 h-3" />
-                  야간 풍속 ({selectedHour}시)
-                </div>
-                <div className="text-sm font-bold text-[#0f172a] tabular-nums">
-                  {activeCourse.windAtHour !== null
-                    ? `${activeCourse.windAtHour.toFixed(1)} m/s`
-                    : "자료 없음"}
-                </div>
-              </div>
-              <span className="text-[11px] text-[#64748b]">
-                {activeCourse.windAtHour !== null && activeCourse.windAtHour < 1.0
-                  ? "대기 정체"
-                  : "순환 양호"}
-              </span>
-            </div>
-
-            <div className="rounded-md border border-[#e2e8f0] bg-[#ffffff] p-3 flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-[11px] text-[#64748b]">
-                  역전층 발생 여부
-                </div>
-                <div
-                  className={`text-sm font-bold tabular-nums ${
+                  className={`text-lg font-bold mt-0.5 ${
                     activeCourse.isInversion
                       ? "text-[#dc2626]"
                       : "text-[#16a34a]"
                   }`}
                 >
-                  {activeCourse.isInversion ? "발생" : "미발생"}
+                  {activeCourse.isInversion ? "역전 발생" : "순환 양호"}
+                </div>
+                <div className="text-[11px] text-[#64748b] tabular-nums mt-0.5">
+                  풍속{" "}
+                  {activeCourse.windAtHour !== null
+                    ? `${activeCourse.windAtHour.toFixed(1)} m/s`
+                    : "-"}
                 </div>
               </div>
-              <span className="text-[11px] text-[#64748b] tabular-nums">
-                {activeCourse.diff >= 0 ? "+" : ""}
-                {activeCourse.diff.toFixed(1)} ㎍/㎥
+
+              <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-2.5">
+                <div className="text-[11px] text-[#64748b]">1시간 러닝 영향</div>
+                <div className="text-lg font-bold text-[#0f172a] tabular-nums mt-0.5">
+                  담배 {activeCourse.cigaretteEq.toFixed(1)}개비
+                </div>
+                <div className="text-[11px] text-[#64748b] tabular-nums mt-0.5">
+                  역전 확률 {activeCourse.inversionProbPct}%
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Simple Hourly Flow Chart (14시 -> 23시) */}
+          <div className="rounded-md border border-[#e2e8f0] bg-[#ffffff] p-3 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-[#0f172a]">
+                시간대별 농도 흐름 (낮 14시 → 밤 23시)
+              </span>
+              <span className="text-[11px] text-[#64748b]">
+                막대 클릭 시 이동
               </span>
             </div>
+            <div className="grid grid-cols-10 gap-1 items-end h-11 pt-1">
+              {activeCourse.eveningSeries.map((pt) => {
+                const pct = Math.min(100, Math.max(14, (pt.pm25 / 60) * 100));
+                const barColor =
+                  pt.pm25 >= 35
+                    ? "bg-[#dc2626]"
+                    : pt.pm25 >= 24
+                    ? "bg-[#d97706]"
+                    : "bg-[#16a34a]";
+                const isCur = pt.hour === selectedHour;
+                return (
+                  <button
+                    key={pt.hour}
+                    type="button"
+                    onClick={() => setSelectedHour(pt.hour)}
+                    title={`${pt.hour}시: ${pt.pm25.toFixed(1)} ㎍/㎥`}
+                    className="flex flex-col items-center justify-end h-full group"
+                  >
+                    <div
+                      className={`w-full rounded-t-xs transition-all ${barColor} ${
+                        isCur
+                          ? "opacity-100 ring-1 ring-[#0f172a]"
+                          : "opacity-55 group-hover:opacity-85"
+                      }`}
+                      style={{ height: `${pct}%` }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-10 gap-1 text-center text-[10px] text-[#64748b] tabular-nums">
+              {activeCourse.eveningSeries.map((pt) => (
+                <span
+                  key={pt.hour}
+                  className={
+                    pt.hour === selectedHour ? "font-bold text-[#0f172a]" : ""
+                  }
+                >
+                  {pt.hour}시
+                </span>
+              ))}
+            </div>
           </div>
 
-          {/* 1-Hour Running Breathing Exposure */}
-          <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-3 space-y-1">
-            <div className="text-xs font-semibold text-[#0f172a]">
-              1시간 러닝 기준 호흡 노출 안내
-            </div>
-            <p className="text-xs text-[#334155] leading-relaxed">
-              유산소 주행 시 분당 환기량은 안정 시 대비 약 2.5배 증가합니다. 현재
-              선택 시각({selectedHour}시, {activeCourse.pmAtHour.toFixed(1)} ㎍/㎥)
-              기준 1시간 야외 러닝 시{" "}
-              <strong className="text-[#0f172a] tabular-nums">
-                담배 약 {activeCourse.cigaretteEq.toFixed(1)}개비
-              </strong>{" "}
-              상당의 초미세먼지 흡입 노출 수준으로 추정됩니다.
-            </p>
-          </div>
-
-          {/* Calm Actionable Guidance */}
-          <div className="rounded-md border border-[#e2e8f0] bg-[#ffffff] p-3 space-y-1.5">
-            <div className="text-xs font-semibold text-[#0f172a] inline-flex items-center gap-1.5">
-              {activeCourse.status === "danger" ? (
-                <AlertTriangle className="w-3.5 h-3.5 text-[#dc2626]" />
-              ) : activeCourse.status === "caution" ? (
-                <Info className="w-3.5 h-3.5 text-[#d97706]" />
-              ) : (
-                <CheckCircle2 className="w-3.5 h-3.5 text-[#16a34a]" />
-              )}
-              행동 권고
-            </div>
-            <p className="text-xs text-[#475569] leading-relaxed">
+          {/* 4. Clear 1-Sentence Advice + Safe Detour Button */}
+          <div className="space-y-2.5">
+            <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2.5 text-xs text-[#334155] leading-relaxed">
+              <strong className="text-[#0f172a]">오늘 안내: </strong>
               {activeCourse.status === "danger"
-                ? `낮 14시(${activeCourse.pm14.toFixed(1)} ㎍/㎥) 대비 밤 22시(${activeCourse.pm22.toFixed(1)} ㎍/㎥) 농도가 상승하는 야간 역전 정체 구간입니다. 저지대 고강도 러닝을 중단하고 1순위 안전 우회 코스나 실내 운동으로 전환하시기 바랍니다.`
+                ? `낮(${activeCourse.pm14.toFixed(
+                    0
+                  )})보다 밤(${activeCourse.pm22.toFixed(
+                    0
+                  )})에 미세먼지가 갇히는 정체 구간입니다. 아래 1순위 안전 코스로 이동하세요.`
                 : activeCourse.status === "caution"
-                ? `대기 확산이 다소 둔화되는 시간대입니다. 호흡량이 급격히 늘어나는 인터벌 주행은 자제하고, 30분 내외의 가벼운 조깅 또는 상위 추천 코스를 이용하시기 바랍니다.`
-                : `수평 환기 및 지형 순환이 유지되어 밤 시간대에도 초미세먼지 축적이 적은 구간입니다. 일반적인 야간 크루 러닝을 진행하기에 적합합니다.`}
-            </p>
-          </div>
+                ? `공기 순환이 다소 느린 구간입니다. 30분 내외 가벼운 조깅이나 1순위 코스를 권장합니다.`
+                : `바람 순환이 유지되어 밤에도 공기가 깨끗합니다. 나이트 러닝하기 좋은 코스입니다.`}
+            </div>
 
-          {/* Direct Detour Button to #1 Best Course */}
-          {bestCourse &&
-            bestCourse.variant.id !== activeCourse.variant.id &&
-            activeCourse.status !== "safe" && (
+            {bestCourse &&
+              bestCourse.variant.id !== activeCourse.variant.id &&
+              activeCourse.status !== "safe" && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCourseId(bestCourse.variant.id)}
+                  className="w-full py-2.5 px-3 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] hover:bg-[#dcfce7] text-[#15803d] text-xs font-semibold flex items-center justify-between transition"
+                >
+                  <span>
+                    1순위 안전 코스로 바로 이동 ({bestCourse.variant.name})
+                  </span>
+                  <ArrowRight className="w-4 h-4 shrink-0" />
+                </button>
+              )}
+
+            {/* Expandable ML Model Details for Judges */}
+            <div className="pt-1">
               <button
                 type="button"
-                onClick={() => setSelectedCourseId(bestCourse.variant.id)}
-                className="w-full py-2.5 px-3 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] hover:bg-[#dcfce7] text-[#15803d] text-xs font-semibold flex items-center justify-between transition"
+                onClick={() => setShowModelDetail((v) => !v)}
+                className="w-full flex items-center justify-between text-[11px] text-[#64748b] hover:text-[#0f172a] py-1"
               >
                 <span>
-                  1순위 안전 추천 코스로 바로 이동 ({bestCourse.variant.name})
+                  AI 역전 예측 모델 근거 보기 (22시 예상{" "}
+                  {activeCourse.predictedPm22.toFixed(1)} ㎍/㎥ · R²{" "}
+                  {modelMetrics.rSquared.toFixed(2)})
                 </span>
-                <ArrowRight className="w-4 h-4 shrink-0" />
+                {showModelDetail ? (
+                  <ChevronUp className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                )}
               </button>
-            )}
+
+              {showModelDetail && (
+                <div className="mt-1.5 rounded-md border border-[#e2e8f0] bg-[#ffffff] p-2.5 text-[11px] text-[#475569] space-y-1">
+                  <div className="flex justify-between">
+                    <span>다중선형회귀(Ridge) 정확도</span>
+                    <span className="font-semibold text-[#0f172a] tabular-nums">
+                      R² {modelMetrics.rSquared.toFixed(3)} · 평균 오차{" "}
+                      {modelMetrics.mae.toFixed(1)} ㎍/㎥
+                    </span>
+                  </div>
+                  {activeRegionMetric.stationPrediction && (
+                    <div className="flex justify-between gap-2">
+                      <span>주요 역전 원인</span>
+                      <span className="font-semibold text-[#0f172a] text-right">
+                        {activeRegionMetric.stationPrediction.topFactor}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
