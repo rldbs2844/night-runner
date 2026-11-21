@@ -5,12 +5,6 @@ import L from "leaflet";
 import type { RegionConfig } from "@/lib/courses";
 import type { TrafficStatus } from "@/lib/csvParser";
 
-export type MapProvider =
-  | "osm"
-  | "vworld-base"
-  | "vworld-hybrid"
-  | "maptiler-positron";
-
 export interface MapCourseItem {
   regionId: string;
   regionLabel: string;
@@ -28,9 +22,6 @@ interface LeafletMapProps {
   courses: MapCourseItem[];
   selectedRegionId: string;
   selectedCourseId: string;
-  mapProvider: MapProvider;
-  vworldKey: string;
-  maptilerKey: string;
   onSelectCourse: (regionId: string, courseId: string) => void;
 }
 
@@ -93,9 +84,6 @@ export default function LeafletMap({
   courses,
   selectedRegionId,
   selectedCourseId,
-  mapProvider,
-  vworldKey,
-  maptilerKey,
   onSelectCourse,
 }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -136,59 +124,14 @@ export default function LeafletMap({
     if (!map || !tileGroup || !el) return;
 
     tileGroup.clearLayers();
+    el.classList.add("osm-muted");
 
-    const effectiveProvider: MapProvider =
-      (mapProvider === "vworld-base" || mapProvider === "vworld-hybrid") &&
-      !vworldKey.trim()
-        ? "osm"
-        : mapProvider === "maptiler-positron" && !maptilerKey.trim()
-        ? "osm"
-        : mapProvider;
-
-    el.classList.toggle("osm-muted", effectiveProvider === "osm");
-
-    if (effectiveProvider === "vworld-base") {
-      L.tileLayer(
-        `https://api.vworld.kr/req/wmts/1.0.0/${vworldKey.trim()}/Base/{z}/{y}/{x}.png`,
-        {
-          attribution: "&copy; 국토교통부 브이월드(VWORLD)",
-          maxZoom: 19,
-          minZoom: 6,
-        }
-      ).addTo(tileGroup);
-    } else if (effectiveProvider === "vworld-hybrid") {
-      L.tileLayer(
-        `https://api.vworld.kr/req/wmts/1.0.0/${vworldKey.trim()}/Satellite/{z}/{y}/{x}.jpeg`,
-        {
-          attribution: "&copy; 국토교통부 브이월드(VWORLD)",
-          maxZoom: 19,
-          minZoom: 6,
-        }
-      ).addTo(tileGroup);
-      L.tileLayer(
-        `https://api.vworld.kr/req/wmts/1.0.0/${vworldKey.trim()}/Hybrid/{z}/{y}/{x}.png`,
-        {
-          maxZoom: 19,
-          minZoom: 6,
-        }
-      ).addTo(tileGroup);
-    } else if (effectiveProvider === "maptiler-positron") {
-      L.tileLayer(
-        `https://api.maptiler.com/maps/positron/256/{z}/{x}/{y}@2x.png?key=${maptilerKey.trim()}`,
-        {
-          attribution:
-            '&copy; <a href="https://www.maptiler.com/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-          maxZoom: 19,
-        }
-      ).addTo(tileGroup);
-    } else {
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19,
-      }).addTo(tileGroup);
-    }
-  }, [mapProvider, vworldKey, maptilerKey]);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(tileGroup);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -241,9 +184,9 @@ export default function LeafletMap({
           zIndexOffset: 500,
           icon: L.divIcon({
             className: "",
-            html: `<div class="km-marker-badge" style="border-color:${color};padding:3px 9px;font-size:11px;">${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥</div>`,
-            iconSize: [180, 24],
-            iconAnchor: [90, 34],
+            html: `<div class="km-marker-badge" style="display:inline-block;transform:translate(-50%,calc(-100% - 12px));border-color:${color};padding:3px 9px;font-size:11px;">${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥</div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
           }),
         }).addTo(group);
 
@@ -268,23 +211,6 @@ export default function LeafletMap({
             }),
           }).addTo(group);
         });
-      } else {
-        const startPt = course.coordinates[0];
-        const marker = L.circleMarker(startPt, {
-          radius: 5,
-          color: "#ffffff",
-          weight: 2,
-          fillColor: color,
-          fillOpacity: 1,
-        }).addTo(group);
-
-        marker.bindTooltip(
-          `${course.courseName} (${course.pmAtHour.toFixed(1)} ㎍/㎥)`,
-          { direction: "top", offset: [0, -6] }
-        );
-        marker.on("click", () => {
-          onSelectCourse(course.regionId, course.courseId);
-        });
       }
     });
 
@@ -296,7 +222,12 @@ export default function LeafletMap({
       );
       if (activeCourse && activeCourse.coordinates.length > 0) {
         const bounds = L.latLngBounds(activeCourse.coordinates);
-        map.fitBounds(bounds, { padding: [52, 52], maxZoom: 14, animate: true });
+        map.fitBounds(bounds, {
+          paddingTopLeft: [115, 105],
+          paddingBottomRight: [115, 70],
+          maxZoom: 14,
+          animate: true,
+        });
       } else {
         const reg = regions.find((r) => r.id === selectedRegionId);
         if (reg) map.setView(reg.center, reg.zoom, { animate: true });

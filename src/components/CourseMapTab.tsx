@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import {
   ArrowRight,
   Clock,
-  KeyRound,
   Download,
   ChevronDown,
   ChevronUp,
@@ -20,9 +19,9 @@ import type {
   RegressionModelMetrics,
   StationPrediction,
 } from "@/lib/inversionModel";
-import type { MapCourseItem, MapProvider } from "@/components/LeafletMap";
+import type { MapCourseItem } from "@/components/LeafletMap";
 
-type ExtendedMapProvider = MapProvider | "kakao";
+type MapViewMode = "kakao" | "kakao-skyview" | "osm";
 
 const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   ssr: false,
@@ -75,9 +74,7 @@ const STATUS_BADGE: Record<
   },
 };
 
-const ENV_KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY ?? "";
-const ENV_VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY ?? "";
-const ENV_MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_API_KEY ?? "";
+const ENV_KAKAO_KEY = (process.env.NEXT_PUBLIC_KAKAO_MAP_KEY ?? "").trim();
 
 const storageListeners = new Set<() => void>();
 function subscribeStorage(cb: () => void) {
@@ -129,42 +126,20 @@ export default function CourseMapTab({
   );
   const [showModelDetail, setShowModelDetail] = useState<boolean>(false);
 
+  const defaultMode: MapViewMode = ENV_KAKAO_KEY ? "kakao" : "osm";
   const [storedProvider, setStoredProvider] = useStoredValue(
     "nr_map_provider",
-    ENV_KAKAO_KEY ? "kakao" : "osm"
+    defaultMode
   );
-  const mapProvider = storedProvider as ExtendedMapProvider;
-  const [kakaoKey, setKakaoKey] = useStoredValue("nr_kakao_key", ENV_KAKAO_KEY);
-  const [vworldKey, setVworldKey] = useStoredValue(
-    "nr_vworld_key",
-    ENV_VWORLD_KEY
-  );
-  const [maptilerKey, setMaptilerKey] = useStoredValue(
-    "nr_maptiler_key",
-    ENV_MAPTILER_KEY
-  );
-  const [showKeyPanel, setShowKeyPanel] = useState<boolean>(false);
+  const mapProvider: MapViewMode =
+    storedProvider === "kakao" ||
+    storedProvider === "kakao-skyview" ||
+    storedProvider === "osm"
+      ? storedProvider
+      : defaultMode;
 
-  const handleChangeProvider = (next: ExtendedMapProvider) => {
+  const handleChangeProvider = (next: MapViewMode) => {
     setStoredProvider(next);
-    if (
-      (next === "kakao" && !kakaoKey.trim()) ||
-      ((next === "vworld-base" || next === "vworld-hybrid") &&
-        !vworldKey.trim()) ||
-      (next === "maptiler-positron" && !maptilerKey.trim())
-    ) {
-      setShowKeyPanel(true);
-    }
-  };
-
-  const handleSaveKeys = (
-    nextKakao: string,
-    nextVworld: string,
-    nextMaptiler: string
-  ) => {
-    setKakaoKey(nextKakao.trim());
-    setVworldKey(nextVworld.trim());
-    setMaptilerKey(nextMaptiler.trim());
   };
 
   const summaryMap = useMemo(() => {
@@ -326,13 +301,9 @@ ${trkpts}
     URL.revokeObjectURL(url);
   };
 
-  const needsMissingKeyWarning =
-    (mapProvider === "kakao" && !kakaoKey.trim()) ||
-    ((mapProvider === "vworld-base" || mapProvider === "vworld-hybrid") &&
-      !vworldKey.trim()) ||
-    (mapProvider === "maptiler-positron" && !maptilerKey.trim());
-
-  const useKakao = mapProvider === "kakao" && Boolean(kakaoKey.trim());
+  const isKakaoMode =
+    mapProvider === "kakao" || mapProvider === "kakao-skyview";
+  const useKakao = isKakaoMode && Boolean(ENV_KAKAO_KEY);
 
   return (
     <div className="space-y-4">
@@ -419,113 +390,34 @@ ${trkpts}
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex flex-wrap rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-0.5 text-[11px]">
-                {(
-                  [
-                    ["kakao", "카카오맵"],
-                    ["osm", "기본 지도"],
-                    ["vworld-base", "브이월드"],
-                    ["vworld-hybrid", "위성"],
-                    ["maptiler-positron", "MapTiler"],
-                  ] as [ExtendedMapProvider, string][]
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => handleChangeProvider(key)}
-                    className={`px-2 py-1 rounded font-medium transition ${
-                      mapProvider === key
-                        ? "bg-[#ffffff] text-[#0f172a] border border-[#e2e8f0]"
-                        : "text-[#64748b] hover:text-[#0f172a] border border-transparent"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowKeyPanel((v) => !v)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[#e2e8f0] bg-[#ffffff] hover:bg-[#f8fafc] text-[11px] font-medium text-[#334155]"
-              >
-                <KeyRound className="w-3 h-3 text-[#475569]" />
-                API 키
-              </button>
+            <div className="inline-flex rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-0.5 text-[11px]">
+              {(
+                [
+                  ["kakao", "카카오맵"],
+                  ["kakao-skyview", "스카이뷰"],
+                  ["osm", "기본 지도"],
+                ] as [MapViewMode, string][]
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handleChangeProvider(key)}
+                  className={`px-2.5 py-1 rounded font-medium whitespace-nowrap transition ${
+                    mapProvider === key
+                      ? "bg-[#ffffff] text-[#0f172a] border border-[#e2e8f0]"
+                      : "text-[#64748b] hover:text-[#0f172a] border border-transparent"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {showKeyPanel && (
-            <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-3 space-y-2.5 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-[#0f172a]">
-                  지도 API 키 설정
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowKeyPanel(false)}
-                  className="text-[11px] text-[#64748b] hover:text-[#0f172a]"
-                >
-                  닫기
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <label className="space-y-1">
-                  <span className="block text-[11px] text-[#475569]">
-                    카카오맵 JavaScript 키
-                  </span>
-                  <input
-                    type="text"
-                    value={kakaoKey}
-                    onChange={(e) =>
-                      handleSaveKeys(e.target.value, vworldKey, maptilerKey)
-                    }
-                    placeholder="JavaScript 키 입력"
-                    className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="block text-[11px] text-[#475569]">
-                    브이월드(VWORLD) 키
-                  </span>
-                  <input
-                    type="text"
-                    value={vworldKey}
-                    onChange={(e) =>
-                      handleSaveKeys(kakaoKey, e.target.value, maptilerKey)
-                    }
-                    placeholder="선택 입력"
-                    className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="block text-[11px] text-[#475569]">
-                    MapTiler 키
-                  </span>
-                  <input
-                    type="text"
-                    value={maptilerKey}
-                    onChange={(e) =>
-                      handleSaveKeys(kakaoKey, vworldKey, e.target.value)
-                    }
-                    placeholder="선택 입력"
-                    className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
-                  />
-                </label>
-              </div>
-            </div>
-          )}
-
-          {needsMissingKeyWarning && (
-            <div className="rounded-md border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] text-[#b45309]">
-              선택한 지도의 API 키가 비어 있어 기본 지도로 표시 중입니다.
-            </div>
-          )}
-
           {useKakao ? (
             <KakaoMap
-              kakaoKey={kakaoKey}
+              kakaoKey={ENV_KAKAO_KEY}
+              mapType={mapProvider === "kakao-skyview" ? "skyview" : "roadmap"}
               regions={REGIONS}
               courses={mapCourses}
               selectedRegionId={selectedRegionId}
@@ -541,9 +433,6 @@ ${trkpts}
               courses={mapCourses}
               selectedRegionId={selectedRegionId}
               selectedCourseId={activeCourse.variant.id}
-              mapProvider={mapProvider === "kakao" ? "osm" : mapProvider}
-              vworldKey={vworldKey}
-              maptilerKey={maptilerKey}
               onSelectCourse={(regionId, courseId) => {
                 setSelectedRegionId(regionId);
                 setSelectedCourseId(courseId);

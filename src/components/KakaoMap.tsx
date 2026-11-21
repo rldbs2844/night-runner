@@ -7,6 +7,7 @@ import type { TrafficStatus } from "@/lib/csvParser";
 
 interface KakaoMapProps {
   kakaoKey: string;
+  mapType?: "roadmap" | "skyview";
   regions: RegionConfig[];
   courses: MapCourseItem[];
   selectedRegionId: string;
@@ -65,6 +66,7 @@ function getDistanceMarkers(
 
 export default function KakaoMap({
   kakaoKey,
+  mapType = "roadmap",
   regions,
   courses,
   selectedRegionId,
@@ -104,9 +106,10 @@ export default function KakaoMap({
           center,
           level: 5,
         });
-        map.addControl(
-          new window.kakao.maps.MapTypeControl(),
-          window.kakao.maps.ControlPosition.TOPRIGHT
+        map.setMapTypeId(
+          mapType === "skyview"
+            ? window.kakao.maps.MapTypeId.HYBRID
+            : window.kakao.maps.MapTypeId.ROADMAP
         );
         map.addControl(
           new window.kakao.maps.ZoomControl(),
@@ -158,10 +161,34 @@ export default function KakaoMap({
   useEffect(() => {
     const map = mapRef.current;
     const kakao = window.kakao?.maps;
+    if (!sdkReady || !map || !kakao?.MapTypeId) return;
+    map.setMapTypeId(
+      mapType === "skyview" ? kakao.MapTypeId.HYBRID : kakao.MapTypeId.ROADMAP
+    );
+  }, [sdkReady, mapType]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const kakao = window.kakao?.maps;
     if (!sdkReady || !map || !kakao) return;
 
     objectsRef.current.forEach((obj) => obj.setMap(null));
     objectsRef.current = [];
+
+    // Single reusable hover tooltip for unselected courses
+    const hoverEl = document.createElement("div");
+    hoverEl.className = "km-marker-badge";
+    hoverEl.style.pointerEvents = "none";
+    hoverEl.style.padding = "3px 8px";
+    hoverEl.style.fontSize = "11px";
+    const hoverOverlay = new kakao.CustomOverlay({
+      position: new kakao.LatLng(37.5, 127.0),
+      content: hoverEl,
+      xAnchor: 0.5,
+      yAnchor: 1.6,
+      zIndex: 7,
+    });
+    objectsRef.current.push(hoverOverlay);
 
     courses.forEach((course) => {
       const isSelected = course.courseId === selectedCourseId;
@@ -193,10 +220,27 @@ export default function KakaoMap({
       kakao.event.addListener(polyline, "click", () => {
         onSelectCourse(course.regionId, course.courseId);
       });
+
+      if (!isSelected) {
+        const midIdx = Math.floor(course.coordinates.length / 2);
+        const midPt = course.coordinates[midIdx] ?? course.coordinates[0];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        kakao.event.addListener(polyline, "mouseover", (e?: any) => {
+          hoverEl.style.borderColor = color;
+          hoverEl.textContent = `${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥`;
+          const pos =
+            e?.latLng ?? new kakao.LatLng(midPt[0], midPt[1]);
+          hoverOverlay.setPosition(pos);
+          hoverOverlay.setMap(map);
+        });
+        kakao.event.addListener(polyline, "mouseout", () => {
+          hoverOverlay.setMap(null);
+        });
+      }
+
       objectsRef.current.push(polyline);
 
       if (isSelected) {
-        // Selected course floating title pill placed cleanly above highest point
         let topPt = course.coordinates[0];
         for (const pt of course.coordinates) {
           if (pt[0] > topPt[0]) topPt = pt;
@@ -213,7 +257,7 @@ export default function KakaoMap({
           position: new kakao.LatLng(topPt[0], topPt[1]),
           content: titlePill,
           xAnchor: 0.5,
-          yAnchor: 2.35,
+          yAnchor: 1.85,
           zIndex: 6,
         });
         titleOverlay.setMap(map);
@@ -238,32 +282,6 @@ export default function KakaoMap({
           overlay.setMap(map);
           objectsRef.current.push(overlay);
         });
-      } else if (course.regionId === selectedRegionId) {
-        // Compact clickable dot for sibling routes so labels never collide with lines/km markers
-        const dotBtn = document.createElement("button");
-        dotBtn.type = "button";
-        dotBtn.title = `${course.courseName} (${course.pmAtHour.toFixed(1)} ㎍/㎥)`;
-        dotBtn.style.width = "12px";
-        dotBtn.style.height = "12px";
-        dotBtn.style.borderRadius = "9999px";
-        dotBtn.style.background = color;
-        dotBtn.style.border = "2px solid #ffffff";
-        dotBtn.style.boxShadow = "0 1px 3px rgba(15,23,42,0.28)";
-        dotBtn.style.cursor = "pointer";
-        dotBtn.onclick = () => onSelectCourse(course.regionId, course.courseId);
-
-        const overlay = new kakao.CustomOverlay({
-          position: new kakao.LatLng(
-            course.coordinates[0][0],
-            course.coordinates[0][1]
-          ),
-          content: dotBtn,
-          xAnchor: 0.5,
-          yAnchor: 0.5,
-          zIndex: 2,
-        });
-        overlay.setMap(map);
-        objectsRef.current.push(overlay);
       }
     });
 
@@ -278,7 +296,8 @@ export default function KakaoMap({
         activeCourse.coordinates.forEach(([lat, lng]) =>
           bounds.extend(new kakao.LatLng(lat, lng))
         );
-        map.setBounds(bounds, 65, 65, 65, 65);
+        // Generous top/side padding so course title & km labels never clip at map edges
+        map.setBounds(bounds, 105, 115, 70, 115);
       }
     }
   }, [sdkReady, courses, selectedRegionId, selectedCourseId, onSelectCourse]);

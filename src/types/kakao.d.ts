@@ -25,12 +25,17 @@ declare global {
         }) => any;
         ZoomControl: new () => any;
         MapTypeControl: new () => any;
+        MapTypeId: {
+          ROADMAP: any;
+          SKYVIEW: any;
+          HYBRID: any;
+        };
         ControlPosition: {
           TOPRIGHT: any;
           RIGHT: any;
         };
         event: {
-          addListener: (target: any, type: string, handler: () => void) => void;
+          addListener: (target: any, type: string, handler: (e?: any) => void) => void;
         };
       };
     };
