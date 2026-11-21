@@ -240,7 +240,7 @@ export default function HomePage() {
             판별 기준: 낮(14시) 평균 PM2.5 &lt; 밤(22시) 평균 PM2.5 역전 조건 및 야간 풍속 정체 여부
           </span>
           <span>
-            지도: OpenStreetMap · Esri 위성 · 카카오맵 | 대기·기상: data.csv · Open-Meteo
+            지도: 카카오맵 · OpenStreetMap · Esri 위성 | 대기·기상: data.csv · Open-Meteo
           </span>
         </div>
       </footer>

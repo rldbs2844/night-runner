@@ -91,8 +91,10 @@ export default function CourseMapTab({
   );
   const [showModelDetail, setShowModelDetail] = useState<boolean>(false);
 
-  // Never persist map mode in localStorage; always start on reliable OpenStreetMap
-  const [mapProvider, setMapProvider] = useState<MapViewMode>("osm");
+  // Never persist map mode in localStorage; start on Kakao Map when key exists, otherwise OSM
+  const [mapProvider, setMapProvider] = useState<MapViewMode>(
+    ENV_KAKAO_KEY ? "kakao" : "osm"
+  );
   const [mapToast, setMapToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -383,9 +385,9 @@ ${trkpts}
             <div className="inline-flex rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-0.5 text-[11px]">
               {(
                 [
+                  ["kakao", "카카오맵"],
                   ["osm", "기본 지도"],
                   ["satellite", "위성 지도"],
-                  ["kakao", "카카오맵"],
                 ] as [MapViewMode, string][]
               ).map(([key, label]) => (
                 <button
