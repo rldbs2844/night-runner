@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   ArrowRight,
@@ -8,6 +8,7 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
+  X,
 } from "lucide-react";
 import { REGIONS, type CourseVariant } from "@/lib/courses";
 import {
@@ -20,23 +21,15 @@ import type {
   StationPrediction,
 } from "@/lib/inversionModel";
 import type { MapCourseItem } from "@/components/LeafletMap";
+import KakaoMap from "@/components/KakaoMap";
 
-type MapViewMode = "kakao" | "kakao-skyview" | "osm";
+type MapViewMode = "osm" | "satellite" | "kakao";
 
 const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[460px] sm:h-[520px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
+    <div className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
       지도를 불러오는 중입니다...
-    </div>
-  ),
-});
-
-const KakaoMap = dynamic(() => import("@/components/KakaoMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-[460px] sm:h-[520px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
-      카카오맵을 불러오는 중입니다...
     </div>
   ),
 });
@@ -76,41 +69,13 @@ const STATUS_BADGE: Record<
 
 const ENV_KAKAO_KEY = (process.env.NEXT_PUBLIC_KAKAO_MAP_KEY ?? "").trim();
 
-const storageListeners = new Set<() => void>();
-function subscribeStorage(cb: () => void) {
-  storageListeners.add(cb);
-  const onStorage = () => cb();
-  window.addEventListener("storage", onStorage);
-  return () => {
-    storageListeners.delete(cb);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-function notifyStorage() {
-  storageListeners.forEach((cb) => cb());
-}
-function useStoredValue(
-  key: string,
-  fallback: string
-): [string, (val: string) => void] {
-  const value = useSyncExternalStore(
-    subscribeStorage,
-    () => {
-      try {
-        return window.localStorage.getItem(key) ?? fallback;
-      } catch {
-        return fallback;
-      }
-    },
-    () => fallback
-  );
-  const setValue = (next: string) => {
-    try {
-      window.localStorage.setItem(key, next);
-    } catch {}
-    notifyStorage();
-  };
-  return [value, setValue];
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 export default function CourseMapTab({
@@ -126,21 +91,38 @@ export default function CourseMapTab({
   );
   const [showModelDetail, setShowModelDetail] = useState<boolean>(false);
 
-  const defaultMode: MapViewMode = ENV_KAKAO_KEY ? "kakao" : "osm";
-  const [storedProvider, setStoredProvider] = useStoredValue(
-    "nr_map_provider",
-    defaultMode
-  );
-  const mapProvider: MapViewMode =
-    storedProvider === "kakao" ||
-    storedProvider === "kakao-skyview" ||
-    storedProvider === "osm"
-      ? storedProvider
-      : defaultMode;
+  // Never persist map mode in localStorage; always start on reliable OpenStreetMap
+  const [mapProvider, setMapProvider] = useState<MapViewMode>("osm");
+  const [mapToast, setMapToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.removeItem("nr_map_provider");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!mapToast) return;
+    const t = window.setTimeout(() => setMapToast(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [mapToast]);
 
   const handleChangeProvider = (next: MapViewMode) => {
-    setStoredProvider(next);
+    if (next === "kakao" && !ENV_KAKAO_KEY) {
+      setMapProvider("osm");
+      setMapToast(
+        "카카오맵 키가 없어 기본 지도(OpenStreetMap)로 표시합니다. 위성 보기는 '위성 지도'를 이용해 주세요."
+      );
+      return;
+    }
+    setMapToast(null);
+    setMapProvider(next);
   };
+
+  const handleKakaoFallback = useCallback((reason: string) => {
+    setMapProvider("osm");
+    setMapToast(reason);
+  }, []);
 
   const summaryMap = useMemo(() => {
     const map = new Map<string, StationSummary>();
@@ -281,11 +263,11 @@ export default function CourseMapTab({
     const gpx = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="NightRunner" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata>
-    <name>${v.name}</name>
-    <desc>${activeRegionMetric.region.label} (${v.distanceKm}km) · ${v.terrainNote}</desc>
+    <name>${escapeXml(v.name)}</name>
+    <desc>${escapeXml(activeRegionMetric.region.label)} (${v.distanceKm}km) · ${escapeXml(v.terrainNote)}</desc>
   </metadata>
   <trk>
-    <name>${v.name}</name>
+    <name>${escapeXml(v.name)}</name>
     <trkseg>
 ${trkpts}
     </trkseg>
@@ -297,13 +279,21 @@ ${trkpts}
     const a = document.createElement("a");
     a.href = url;
     a.download = `${v.id}.gpx`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const isKakaoMode =
-    mapProvider === "kakao" || mapProvider === "kakao-skyview";
-  const useKakao = isKakaoMode && Boolean(ENV_KAKAO_KEY);
+  const handleSelectCourseFromMap = useCallback(
+    (regionId: string, courseId: string) => {
+      setSelectedRegionId(regionId);
+      setSelectedCourseId(courseId);
+    },
+    []
+  );
+
+  const useKakao = mapProvider === "kakao" && Boolean(ENV_KAKAO_KEY);
 
   return (
     <div className="space-y-4">
@@ -393,9 +383,9 @@ ${trkpts}
             <div className="inline-flex rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-0.5 text-[11px]">
               {(
                 [
-                  ["kakao", "카카오맵"],
-                  ["kakao-skyview", "스카이뷰"],
                   ["osm", "기본 지도"],
+                  ["satellite", "위성 지도"],
+                  ["kakao", "카카오맵"],
                 ] as [MapViewMode, string][]
               ).map(([key, label]) => (
                 <button
@@ -414,8 +404,26 @@ ${trkpts}
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-3 py-1.5 text-xs">
-            <div className="flex items-center gap-2 min-w-0">
+          {mapToast && (
+            <div
+              role="status"
+              className="flex items-center justify-between gap-2 rounded-md border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-xs text-[#b45309]"
+            >
+              <span>{mapToast}</span>
+              <button
+                type="button"
+                onClick={() => setMapToast(null)}
+                aria-label="알림 닫기"
+                className="shrink-0 p-0.5 rounded hover:bg-[#fef3c7]"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="relative">
+            {/* Fixed top-left badge so course title/PM never collides with route or finish markers */}
+            <div className="pointer-events-none absolute top-3 left-3 z-[450] max-w-[calc(100%-4.5rem)] rounded-md border border-[#cbd5e1] bg-[#ffffff]/95 px-2.5 py-1.5 shadow-sm flex items-center gap-2 text-xs">
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${activeBadge.dot}`}
               />
@@ -425,38 +433,33 @@ ${trkpts}
               <span className="text-[#64748b] shrink-0">
                 {activeCourse.variant.distanceKm.toFixed(1)}km
               </span>
+              <span className="font-bold text-[#0f172a] tabular-nums shrink-0">
+                {activeCourse.pmAtHour.toFixed(1)} ㎍/㎥
+              </span>
             </div>
-            <span className="font-bold text-[#0f172a] tabular-nums shrink-0">
-              {selectedHour}시 {activeCourse.pmAtHour.toFixed(1)} ㎍/㎥ ·{" "}
-              <span className={activeBadge.text}>{activeBadge.label}</span>
-            </span>
-          </div>
 
-          {useKakao ? (
-            <KakaoMap
-              kakaoKey={ENV_KAKAO_KEY}
-              mapType={mapProvider === "kakao-skyview" ? "skyview" : "roadmap"}
-              regions={REGIONS}
-              courses={mapCourses}
-              selectedRegionId={selectedRegionId}
-              selectedCourseId={activeCourse.variant.id}
-              onSelectCourse={(regionId, courseId) => {
-                setSelectedRegionId(regionId);
-                setSelectedCourseId(courseId);
-              }}
-            />
-          ) : (
-            <LeafletMap
-              regions={REGIONS}
-              courses={mapCourses}
-              selectedRegionId={selectedRegionId}
-              selectedCourseId={activeCourse.variant.id}
-              onSelectCourse={(regionId, courseId) => {
-                setSelectedRegionId(regionId);
-                setSelectedCourseId(courseId);
-              }}
-            />
-          )}
+            {useKakao ? (
+              <KakaoMap
+                kakaoKey={ENV_KAKAO_KEY}
+                mapType="roadmap"
+                regions={REGIONS}
+                courses={mapCourses}
+                selectedRegionId={selectedRegionId}
+                selectedCourseId={activeCourse.variant.id}
+                onSelectCourse={handleSelectCourseFromMap}
+                onFallback={handleKakaoFallback}
+              />
+            ) : (
+              <LeafletMap
+                tileMode={mapProvider === "satellite" ? "satellite" : "osm"}
+                regions={REGIONS}
+                courses={mapCourses}
+                selectedRegionId={selectedRegionId}
+                selectedCourseId={activeCourse.variant.id}
+                onSelectCourse={handleSelectCourseFromMap}
+              />
+            )}
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-[11px] text-[#64748b]">

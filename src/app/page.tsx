@@ -36,6 +36,9 @@ export default function HomePage() {
 
   const handleUploadFile = (file: File) => {
     const reader = new FileReader();
+    reader.onerror = () => {
+      setUploadError("파일을 읽는 중 오류가 발생했습니다. CSV 형식을 확인해 주세요.");
+    };
     reader.onload = (ev) => {
       const buffer = ev.target?.result;
       if (!(buffer instanceof ArrayBuffer)) return;
@@ -64,8 +67,10 @@ export default function HomePage() {
     const a = document.createElement("a");
     a.href = url;
     a.download = "data.csv";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleResetSample = () => {
@@ -90,11 +95,17 @@ export default function HomePage() {
       setIsSample(false);
       setEncodingInfo("실시간 JSON");
       setUploadError(null);
-    } catch (err) {
+    } catch {
+      // Auto-fallback cleanly back to data.csv mode on API failure
+      setDataMode("csv");
+      if (records.length === 0) {
+        setRecords(DEFAULT_PARSED.records);
+        setFileName("data.csv (기본 샘플)");
+        setIsSample(true);
+        setEncodingInfo("UTF-8");
+      }
       setLiveError(
-        err instanceof Error
-          ? err.message
-          : "실시간 대기·기상 데이터를 불러오지 못했습니다."
+        "실시간 대기·기상 API 연결에 실패해 data.csv 기준 데이터로 자동 복구했습니다."
       );
     } finally {
       setLiveLoading(false);
@@ -119,7 +130,16 @@ export default function HomePage() {
               야간 대기 역전층(14시 vs 22시 PM2.5) 분석 기반 권역별 러닝 코스 환경 정보
             </p>
             {liveError && (
-              <p className="text-xs text-[#dc2626] mt-1">{liveError}</p>
+              <div className="mt-1.5 inline-flex items-center gap-2 rounded border border-[#fde68a] bg-[#fffbeb] px-2.5 py-1 text-xs text-[#b45309]">
+                <span>{liveError}</span>
+                <button
+                  type="button"
+                  onClick={() => setLiveError(null)}
+                  className="font-semibold underline"
+                >
+                  닫기
+                </button>
+              </div>
             )}
           </div>
 
@@ -220,7 +240,7 @@ export default function HomePage() {
             판별 기준: 낮(14시) 평균 PM2.5 &lt; 밤(22시) 평균 PM2.5 역전 조건 및 야간 풍속 정체 여부
           </span>
           <span>
-            지도: 카카오맵 · 스카이뷰 · OpenStreetMap | 대기·기상: data.csv · Open-Meteo
+            지도: OpenStreetMap · Esri 위성 · 카카오맵 | 대기·기상: data.csv · Open-Meteo
           </span>
         </div>
       </footer>

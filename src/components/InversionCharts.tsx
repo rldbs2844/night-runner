@@ -10,6 +10,17 @@ interface InversionChartsProps {
   fileName: string;
 }
 
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function downloadSvgAsPng(svgEl: SVGSVGElement | null, filename: string) {
   if (!svgEl) return;
   const clone = svgEl.cloneNode(true) as SVGSVGElement;
@@ -36,12 +47,23 @@ function downloadSvgAsPng(svgEl: SVGSVGElement | null, filename: string) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.scale(scale, scale);
       ctx.drawImage(img, 0, 0, width, height);
-      const pngUrl = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = pngUrl;
-      a.download = filename;
-      a.click();
+      canvas.toBlob((pngBlob) => {
+        if (pngBlob) {
+          triggerBlobDownload(pngBlob, filename);
+        } else {
+          const pngUrl = canvas.toDataURL("image/png");
+          const a = document.createElement("a");
+          a.href = pngUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+      }, "image/png");
     }
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = () => {
     URL.revokeObjectURL(url);
   };
   img.src = url;
@@ -73,12 +95,7 @@ export default function InversionCharts({
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json;charset=utf-8",
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "night-runner-inversion-analysis.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, "night-runner-inversion-analysis.json");
   };
 
   // --- Chart 1 Geometry: Hourly PM2.5 Trend ---

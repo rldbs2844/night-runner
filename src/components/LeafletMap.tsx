@@ -5,6 +5,8 @@ import L from "leaflet";
 import type { RegionConfig } from "@/lib/courses";
 import type { TrafficStatus } from "@/lib/csvParser";
 
+export type LeafletTileMode = "osm" | "satellite";
+
 export interface MapCourseItem {
   regionId: string;
   regionLabel: string;
@@ -18,6 +20,7 @@ export interface MapCourseItem {
 }
 
 interface LeafletMapProps {
+  tileMode?: LeafletTileMode;
   regions: RegionConfig[];
   courses: MapCourseItem[];
   selectedRegionId: string;
@@ -91,6 +94,7 @@ function getDistanceMarkers(
 }
 
 export default function LeafletMap({
+  tileMode = "osm",
   regions,
   courses,
   selectedRegionId,
@@ -102,6 +106,10 @@ export default function LeafletMap({
   const tileGroupRef = useRef<L.LayerGroup | null>(null);
   const courseGroupRef = useRef<L.LayerGroup | null>(null);
   const lastViewKeyRef = useRef<string>("");
+  const onSelectCourseRef = useRef(onSelectCourse);
+  useEffect(() => {
+    onSelectCourseRef.current = onSelectCourse;
+  }, [onSelectCourse]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -112,8 +120,11 @@ export default function LeafletMap({
     const map = L.map(containerRef.current, {
       center: initialRegion.center,
       zoom: initialRegion.zoom,
-      zoomControl: true,
+      zoomControl: false,
     });
+
+    // Put zoom control on top-right so top-left fixed course badge never collides
+    L.control.zoom({ position: "topright" }).addTo(map);
 
     tileGroupRef.current = L.layerGroup().addTo(map);
     courseGroupRef.current = L.layerGroup().addTo(map);
@@ -135,14 +146,25 @@ export default function LeafletMap({
     if (!map || !tileGroup || !el) return;
 
     tileGroup.clearLayers();
-    el.classList.add("osm-muted");
+    el.classList.toggle("osm-muted", tileMode === "osm");
 
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
-    }).addTo(tileGroup);
-  }, []);
+    if (tileMode === "satellite") {
+      L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
+          attribution:
+            "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics",
+          maxZoom: 19,
+        }
+      ).addTo(tileGroup);
+    } else {
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+      }).addTo(tileGroup);
+    }
+  }, [tileMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -182,7 +204,7 @@ export default function LeafletMap({
       );
 
       line.on("click", () => {
-        onSelectCourse(course.regionId, course.courseId);
+        onSelectCourseRef.current(course.regionId, course.courseId);
       });
 
       if (isSelected) {
@@ -239,7 +261,7 @@ export default function LeafletMap({
       if (activeCourse && activeCourse.coordinates.length > 0) {
         const bounds = L.latLngBounds(activeCourse.coordinates);
         map.fitBounds(bounds, {
-          paddingTopLeft: [130, 85],
+          paddingTopLeft: [130, 95],
           paddingBottomRight: [130, 85],
           maxZoom: 14,
           animate: true,
@@ -249,7 +271,7 @@ export default function LeafletMap({
         if (reg) map.setView(reg.center, reg.zoom, { animate: true });
       }
     }
-  }, [courses, regions, selectedRegionId, selectedCourseId, onSelectCourse]);
+  }, [courses, regions, selectedRegionId, selectedCourseId]);
 
   return (
     <div

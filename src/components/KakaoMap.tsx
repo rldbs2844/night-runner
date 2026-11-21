@@ -13,6 +13,7 @@ interface KakaoMapProps {
   selectedRegionId: string;
   selectedCourseId: string;
   onSelectCourse: (regionId: string, courseId: string) => void;
+  onFallback: (reason: string) => void;
 }
 
 const STATUS_COLOR: Record<TrafficStatus, string> = {
@@ -79,6 +80,7 @@ export default function KakaoMap({
   selectedRegionId,
   selectedCourseId,
   onSelectCourse,
+  onFallback,
 }: KakaoMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,53 +88,109 @@ export default function KakaoMap({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectsRef = useRef<any[]>([]);
   const lastViewKeyRef = useRef<string>("");
+  const onSelectCourseRef = useRef(onSelectCourse);
+  const onFallbackRef = useRef(onFallback);
+  useEffect(() => {
+    onSelectCourseRef.current = onSelectCourse;
+    onFallbackRef.current = onFallback;
+  }, [onSelectCourse, onFallback]);
   const [sdkReady, setSdkReady] = useState<boolean>(false);
-  const [sdkError, setSdkError] = useState<string | null>(null);
 
   useEffect(() => {
     const trimmed = kakaoKey.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      onFallbackRef.current(
+        "카카오맵 API 키가 설정되지 않아 기본 지도(OpenStreetMap)로 전환했습니다."
+      );
+      return;
+    }
 
     let cancelled = false;
+    let settled = false;
     const scriptId = "kakao-maps-sdk";
     const existing = document.getElementById(
       scriptId
     ) as HTMLScriptElement | null;
 
+    const triggerFallback = (reason: string) => {
+      if (cancelled || settled) return;
+      settled = true;
+      setSdkReady(false);
+      onFallbackRef.current(reason);
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      triggerFallback(
+        "카카오맵 SDK가 3초 내에 응답하지 않아 기본 지도(OpenStreetMap)로 자동 전환했습니다."
+      );
+    }, 3000);
+
     const initKakao = () => {
-      if (cancelled || !window.kakao?.maps) return;
-      window.kakao.maps.load(() => {
-        if (cancelled || !containerRef.current || !window.kakao?.maps) return;
-        const reg =
-          regions.find((r) => r.id === selectedRegionId) ?? regions[0];
-        const center = new window.kakao.maps.LatLng(
-          reg.center[0],
-          reg.center[1]
-        );
-        const map = new window.kakao.maps.Map(containerRef.current, {
-          center,
-          level: 5,
+      if (cancelled || settled) return;
+      try {
+        if (!window.kakao?.maps?.load) {
+          window.clearTimeout(timeoutId);
+          triggerFallback(
+            "카카오맵 SDK 초기화에 실패하여 기본 지도(OpenStreetMap)로 전환했습니다."
+          );
+          return;
+        }
+        window.kakao.maps.load(() => {
+          if (cancelled || settled) return;
+          try {
+            if (!containerRef.current || !window.kakao?.maps?.Map) {
+              window.clearTimeout(timeoutId);
+              triggerFallback(
+                "카카오맵 렌더링 객체를 불러오지 못해 기본 지도로 전환했습니다."
+              );
+              return;
+            }
+            const reg =
+              regions.find((r) => r.id === selectedRegionId) ?? regions[0];
+            const center = new window.kakao.maps.LatLng(
+              reg.center[0],
+              reg.center[1]
+            );
+            const map = new window.kakao.maps.Map(containerRef.current, {
+              center,
+              level: 5,
+            });
+            if (window.kakao.maps.MapTypeId) {
+              map.setMapTypeId(
+                mapType === "skyview"
+                  ? window.kakao.maps.MapTypeId.HYBRID
+                  : window.kakao.maps.MapTypeId.ROADMAP
+              );
+            }
+            map.addControl(
+              new window.kakao.maps.ZoomControl(),
+              window.kakao.maps.ControlPosition.RIGHT
+            );
+            mapRef.current = map;
+            lastViewKeyRef.current = "";
+            settled = true;
+            window.clearTimeout(timeoutId);
+            setSdkReady(true);
+          } catch {
+            window.clearTimeout(timeoutId);
+            triggerFallback(
+              "카카오맵 실행 중 오류가 발생하여 기본 지도(OpenStreetMap)로 전환했습니다."
+            );
+          }
         });
-        map.setMapTypeId(
-          mapType === "skyview"
-            ? window.kakao.maps.MapTypeId.HYBRID
-            : window.kakao.maps.MapTypeId.ROADMAP
+      } catch {
+        window.clearTimeout(timeoutId);
+        triggerFallback(
+          "카카오맵 SDK 호출 중 오류가 발생하여 기본 지도(OpenStreetMap)로 전환했습니다."
         );
-        map.addControl(
-          new window.kakao.maps.ZoomControl(),
-          window.kakao.maps.ControlPosition.RIGHT
-        );
-        mapRef.current = map;
-        lastViewKeyRef.current = "";
-        setSdkError(null);
-        setSdkReady(true);
-      });
+      }
     };
 
     if (window.kakao?.maps && existing?.dataset.key === trimmed) {
       initKakao();
       return () => {
         cancelled = true;
+        window.clearTimeout(timeoutId);
       };
     }
 
@@ -150,17 +208,16 @@ export default function KakaoMap({
     )}&autoload=false`;
     script.onload = initKakao;
     script.onerror = () => {
-      if (!cancelled) {
-        setSdkReady(false);
-        setSdkError(
-          "카카오맵 SDK를 불러오지 못했습니다. JavaScript 앱 키와 카카오 디벨로퍼스의 JavaScript SDK 도메인(예: https://rldbs2844.github.io) 등록 여부를 확인해 주세요."
-        );
-      }
+      window.clearTimeout(timeoutId);
+      triggerFallback(
+        "카카오맵 SDK를 불러오지 못해(도메인/키 미등록 등) 기본 지도(OpenStreetMap)로 자동 전환했습니다."
+      );
     };
     document.head.appendChild(script);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kakaoKey]);
@@ -169,9 +226,11 @@ export default function KakaoMap({
     const map = mapRef.current;
     const kakao = window.kakao?.maps;
     if (!sdkReady || !map || !kakao?.MapTypeId) return;
-    map.setMapTypeId(
-      mapType === "skyview" ? kakao.MapTypeId.HYBRID : kakao.MapTypeId.ROADMAP
-    );
+    try {
+      map.setMapTypeId(
+        mapType === "skyview" ? kakao.MapTypeId.HYBRID : kakao.MapTypeId.ROADMAP
+      );
+    } catch {}
   }, [sdkReady, mapType]);
 
   useEffect(() => {
@@ -179,136 +238,134 @@ export default function KakaoMap({
     const kakao = window.kakao?.maps;
     if (!sdkReady || !map || !kakao) return;
 
-    objectsRef.current.forEach((obj) => obj.setMap(null));
-    objectsRef.current = [];
+    try {
+      objectsRef.current.forEach((obj) => obj.setMap(null));
+      objectsRef.current = [];
 
-    // Single reusable hover tooltip for unselected courses
-    const hoverEl = document.createElement("div");
-    hoverEl.className = "km-marker-badge";
-    hoverEl.style.pointerEvents = "none";
-    hoverEl.style.padding = "3px 8px";
-    hoverEl.style.fontSize = "11px";
-    const hoverOverlay = new kakao.CustomOverlay({
-      position: new kakao.LatLng(37.5, 127.0),
-      content: hoverEl,
-      xAnchor: 0.5,
-      yAnchor: 1.6,
-      zIndex: 7,
-    });
-    objectsRef.current.push(hoverOverlay);
-
-    courses.forEach((course) => {
-      const isSelected = course.courseId === selectedCourseId;
-      const color = STATUS_COLOR[course.status];
-      const path = course.coordinates.map(
-        ([lat, lng]) => new kakao.LatLng(lat, lng)
-      );
-
-      if (isSelected) {
-        const halo = new kakao.Polyline({
-          path,
-          strokeWeight: 9,
-          strokeColor: "#ffffff",
-          strokeOpacity: 0.92,
-          strokeStyle: "solid",
-        });
-        halo.setMap(map);
-        objectsRef.current.push(halo);
-      }
-
-      const polyline = new kakao.Polyline({
-        path,
-        strokeWeight: isSelected ? 5.5 : 3.2,
-        strokeColor: color,
-        strokeOpacity: isSelected ? 0.96 : 0.62,
-        strokeStyle: !isSelected ? "shortdash" : "solid",
+      // Single reusable hover tooltip for unselected courses
+      const hoverEl = document.createElement("div");
+      hoverEl.className = "km-marker-badge";
+      hoverEl.style.pointerEvents = "none";
+      hoverEl.style.padding = "3px 8px";
+      hoverEl.style.fontSize = "11px";
+      const hoverOverlay = new kakao.CustomOverlay({
+        position: new kakao.LatLng(37.5, 127.0),
+        content: hoverEl,
+        xAnchor: 0.5,
+        yAnchor: 1.6,
+        zIndex: 7,
       });
-      polyline.setMap(map);
-      kakao.event.addListener(polyline, "click", () => {
-        onSelectCourse(course.regionId, course.courseId);
-      });
+      objectsRef.current.push(hoverOverlay);
 
-      if (!isSelected) {
-        const midIdx = Math.floor(course.coordinates.length / 2);
-        const midPt = course.coordinates[midIdx] ?? course.coordinates[0];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        kakao.event.addListener(polyline, "mouseover", (e?: any) => {
-          hoverEl.style.borderColor = color;
-          hoverEl.textContent = `${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥`;
-          const pos =
-            e?.latLng ?? new kakao.LatLng(midPt[0], midPt[1]);
-          hoverOverlay.setPosition(pos);
-          hoverOverlay.setMap(map);
-        });
-        kakao.event.addListener(polyline, "mouseout", () => {
-          hoverOverlay.setMap(null);
-        });
-      }
-
-      objectsRef.current.push(polyline);
-
-      if (isSelected) {
-        const markers = getDistanceMarkers(course.coordinates);
-        markers.forEach((dm) => {
-          const isEndpoint = dm.kind !== "km";
-          const badge = document.createElement("div");
-          badge.className = "km-marker-badge";
-          badge.style.borderColor = isEndpoint ? color : "#cbd5e1";
-          badge.style.color = isEndpoint ? color : "#0f172a";
-          badge.textContent = dm.label;
-
-          const xAnchor = dm.kind === "km" ? -0.25 : 0.5;
-          const yAnchor =
-            dm.kind === "start" ? 1.45 : dm.kind === "end" ? -0.45 : 0.5;
-
-          const overlay = new kakao.CustomOverlay({
-            position: new kakao.LatLng(dm.point[0], dm.point[1]),
-            content: badge,
-            xAnchor,
-            yAnchor,
-            zIndex: isEndpoint ? 5 : 4,
-          });
-          overlay.setMap(map);
-          objectsRef.current.push(overlay);
-        });
-      }
-    });
-
-    const viewKey = `${selectedRegionId}:${selectedCourseId}`;
-    if (lastViewKeyRef.current !== viewKey) {
-      lastViewKeyRef.current = viewKey;
-      const activeCourse = courses.find(
-        (c) => c.courseId === selectedCourseId
-      );
-      if (activeCourse && activeCourse.coordinates.length > 0) {
-        const bounds = new kakao.LatLngBounds();
-        activeCourse.coordinates.forEach(([lat, lng]) =>
-          bounds.extend(new kakao.LatLng(lat, lng))
+      courses.forEach((course) => {
+        const isSelected = course.courseId === selectedCourseId;
+        const color = STATUS_COLOR[course.status];
+        const path = course.coordinates.map(
+          ([lat, lng]) => new kakao.LatLng(lat, lng)
         );
-        // Generous padding so start/end/km labels never clip or crowd near edges
-        map.setBounds(bounds, 85, 130, 85, 130);
-      }
-    }
-  }, [sdkReady, courses, selectedRegionId, selectedCourseId, onSelectCourse]);
 
-  if (sdkError) {
-    return (
-      <div className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#fecaca] bg-[#fef2f2] p-6 flex flex-col items-center justify-center text-center gap-2">
-        <p className="text-sm font-semibold text-[#b91c1c]">
-          카카오맵 연결을 확인해 주세요
-        </p>
-        <p className="text-xs text-[#7f1d1d] max-w-md leading-relaxed">
-          {sdkError}
-        </p>
-      </div>
-    );
-  }
+        if (isSelected) {
+          const halo = new kakao.Polyline({
+            path,
+            strokeWeight: 9,
+            strokeColor: "#ffffff",
+            strokeOpacity: 0.92,
+            strokeStyle: "solid",
+          });
+          halo.setMap(map);
+          objectsRef.current.push(halo);
+        }
+
+        const polyline = new kakao.Polyline({
+          path,
+          strokeWeight: isSelected ? 5.5 : 3.2,
+          strokeColor: color,
+          strokeOpacity: isSelected ? 0.96 : 0.62,
+          strokeStyle: !isSelected ? "shortdash" : "solid",
+        });
+        polyline.setMap(map);
+        kakao.event.addListener(polyline, "click", () => {
+          onSelectCourseRef.current(course.regionId, course.courseId);
+        });
+
+        if (!isSelected) {
+          const midIdx = Math.floor(course.coordinates.length / 2);
+          const midPt = course.coordinates[midIdx] ?? course.coordinates[0];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          kakao.event.addListener(polyline, "mouseover", (e?: any) => {
+            hoverEl.style.borderColor = color;
+            hoverEl.textContent = `${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥`;
+            const pos = e?.latLng ?? new kakao.LatLng(midPt[0], midPt[1]);
+            hoverOverlay.setPosition(pos);
+            hoverOverlay.setMap(map);
+          });
+          kakao.event.addListener(polyline, "mouseout", () => {
+            hoverOverlay.setMap(null);
+          });
+        }
+
+        objectsRef.current.push(polyline);
+
+        if (isSelected) {
+          const markers = getDistanceMarkers(course.coordinates);
+          markers.forEach((dm) => {
+            const isEndpoint = dm.kind !== "km";
+            const badge = document.createElement("div");
+            badge.className = "km-marker-badge";
+            badge.style.borderColor = isEndpoint ? color : "#cbd5e1";
+            badge.style.color = isEndpoint ? color : "#0f172a";
+            badge.textContent = dm.label;
+
+            const xAnchor = dm.kind === "km" ? -0.25 : 0.5;
+            const yAnchor =
+              dm.kind === "start" ? 1.45 : dm.kind === "end" ? -0.45 : 0.5;
+
+            const overlay = new kakao.CustomOverlay({
+              position: new kakao.LatLng(dm.point[0], dm.point[1]),
+              content: badge,
+              xAnchor,
+              yAnchor,
+              zIndex: isEndpoint ? 5 : 4,
+            });
+            overlay.setMap(map);
+            objectsRef.current.push(overlay);
+          });
+        }
+      });
+
+      const viewKey = `${selectedRegionId}:${selectedCourseId}`;
+      if (lastViewKeyRef.current !== viewKey) {
+        lastViewKeyRef.current = viewKey;
+        const activeCourse = courses.find(
+          (c) => c.courseId === selectedCourseId
+        );
+        if (activeCourse && activeCourse.coordinates.length > 0) {
+          const bounds = new kakao.LatLngBounds();
+          activeCourse.coordinates.forEach(([lat, lng]) =>
+            bounds.extend(new kakao.LatLng(lat, lng))
+          );
+          map.setBounds(bounds, 95, 130, 85, 130);
+        }
+      }
+    } catch {
+      onFallbackRef.current(
+        "카카오맵 경로 표시 중 오류가 발생하여 기본 지도로 전환했습니다."
+      );
+    }
+  }, [sdkReady, courses, selectedRegionId, selectedCourseId]);
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] overflow-hidden bg-[#f8fafc]"
-      aria-label="카카오맵 야간 러닝 코스 지도"
-    />
+    <div className="relative w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] overflow-hidden bg-[#f8fafc]">
+      <div
+        ref={containerRef}
+        className="w-full h-full"
+        aria-label="카카오맵 야간 러닝 코스 지도"
+      />
+      {!sdkReady && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#f8fafc]/85 text-xs text-[#64748b]">
+          카카오맵을 연결하는 중입니다 (최대 3초 대기)...
+        </div>
+      )}
+    </div>
   );
 }
