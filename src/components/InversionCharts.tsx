@@ -102,11 +102,11 @@ export default function InversionCharts({
       55,
       ...stationSummaries.flatMap((s) => [s.pm14, s.pm22])
     ) * 1.18;
-  const barPad = { top: 30, right: 20, bottom: 56, left: 46 };
+  const barPad = { top: 30, right: 16, bottom: 56, left: 42 };
   const barPlotW = W - barPad.left - barPad.right;
   const barPlotH = H - barPad.top - barPad.bottom;
   const groupW = barPlotW / Math.max(1, stationSummaries.length);
-  const barW = Math.min(24, groupW * 0.28);
+  const barW = Math.min(18, Math.max(8, groupW * 0.3));
 
   return (
     <div className="space-y-4">

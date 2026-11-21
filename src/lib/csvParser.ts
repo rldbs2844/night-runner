@@ -73,6 +73,15 @@ export function generateDefaultCsvText(): string {
       temp_night: 5.5,
       daily_factor: [1.02, 0.96, 1.12, 1.08, 0.9, 1.14, 1.1],
     },
+    수원: {
+      base_day: 23.5,
+      inversion_boost: 11.5,
+      wind_day: 2.3,
+      wind_night: 0.9,
+      temp_day: 14.2,
+      temp_night: 4.8,
+      daily_factor: [1.0, 0.95, 1.1, 1.14, 0.92, 1.06, 1.08],
+    },
     대전: {
       base_day: 23.0,
       inversion_boost: 3.0,
@@ -81,6 +90,15 @@ export function generateDefaultCsvText(): string {
       temp_day: 15.0,
       temp_night: 6.2,
       daily_factor: [0.95, 1.12, 0.88, 1.05, 1.15, 0.92, 1.02],
+    },
+    광주: {
+      base_day: 22.5,
+      inversion_boost: 4.5,
+      wind_day: 2.7,
+      wind_night: 1.4,
+      temp_day: 16.2,
+      temp_night: 7.2,
+      daily_factor: [0.96, 1.08, 0.94, 1.12, 0.9, 1.05, 1.04],
     },
     서울: {
       base_day: 26.5,
@@ -91,6 +109,15 @@ export function generateDefaultCsvText(): string {
       temp_night: 7.0,
       daily_factor: [0.96, 1.04, 0.92, 1.08, 0.95, 1.02, 0.98],
     },
+    인천: {
+      base_day: 24.0,
+      inversion_boost: -7.0,
+      wind_day: 3.5,
+      wind_night: 2.9,
+      temp_day: 14.0,
+      temp_night: 8.2,
+      daily_factor: [0.95, 1.02, 0.92, 1.04, 0.96, 0.94, 0.98],
+    },
     부산: {
       base_day: 22.0,
       inversion_boost: -9.0,
@@ -99,6 +126,15 @@ export function generateDefaultCsvText(): string {
       temp_day: 17.5,
       temp_night: 11.5,
       daily_factor: [0.94, 1.02, 0.9, 0.98, 1.05, 0.92, 0.95],
+    },
+    제주: {
+      base_day: 15.5,
+      inversion_boost: -6.5,
+      wind_day: 4.5,
+      wind_night: 4.1,
+      temp_day: 18.0,
+      temp_night: 13.0,
+      daily_factor: [0.92, 0.98, 0.88, 1.02, 0.94, 0.9, 0.96],
     },
   };
 
