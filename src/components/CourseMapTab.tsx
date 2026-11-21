@@ -336,17 +336,17 @@ ${trkpts}
 
   return (
     <div className="space-y-4">
-      {/* Top Control Bar: Hour Slider + 6 Region Buttons */}
+      {/* Top Control Bar: Hour Slider + 14 Region Buttons */}
       <div className="bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-4">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-12 xl:items-center gap-4">
           {/* Hour Slider */}
-          <div className="flex-1 max-w-xl space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 font-semibold text-[#0f172a]">
-                <Clock className="w-3.5 h-3.5 text-[#475569]" />
+          <div className="xl:col-span-5 space-y-1.5 min-w-0">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-[#0f172a] whitespace-nowrap">
+                <Clock className="w-3.5 h-3.5 text-[#475569] shrink-0" />
                 러닝 시각 선택
               </span>
-              <span className="font-bold text-[#0f172a] tabular-nums">
+              <span className="font-bold text-[#0f172a] tabular-nums whitespace-nowrap">
                 {selectedHour}시
                 <span className="ml-1.5 font-normal text-[#64748b]">
                   {selectedHour <= 16
@@ -367,20 +367,20 @@ ${trkpts}
               className="w-full cursor-pointer"
               aria-label="시간대 선택 (14시~23시)"
             />
-            <div className="flex justify-between text-[11px] text-[#64748b] tabular-nums">
-              <span>14시 (낮)</span>
-              <span>18시 (일몰)</span>
-              <span className="font-semibold text-[#0f172a]">
+            <div className="flex justify-between gap-2 text-[11px] text-[#64748b] tabular-nums">
+              <span className="whitespace-nowrap">14시 (낮)</span>
+              <span className="whitespace-nowrap">18시 (일몰)</span>
+              <span className="font-semibold text-[#0f172a] whitespace-nowrap">
                 21~22시 (야간 피크)
               </span>
-              <span>23시</span>
+              <span className="whitespace-nowrap">23시</span>
             </div>
           </div>
 
-          {/* 6 Region Buttons */}
-          <div className="space-y-1.5">
-            <div className="text-xs font-semibold text-[#475569]">
-              지역 선택
+          {/* 14 Region Buttons */}
+          <div className="xl:col-span-7 space-y-1.5">
+            <div className="text-xs font-semibold text-[#475569] whitespace-nowrap">
+              지역 선택 (수도권 8 · 전국 6)
             </div>
             <div className="flex flex-wrap gap-1.5">
               {regionMetrics.map(({ region, primaryCourseStatus }) => {
@@ -391,7 +391,7 @@ ${trkpts}
                     key={region.id}
                     type="button"
                     onClick={() => handleSelectRegion(region.id)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition ${
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition ${
                       isSelected
                         ? "bg-[#0f172a] text-[#ffffff] border-[#0f172a]"
                         : "bg-[#ffffff] text-[#334155] border-[#e2e8f0] hover:bg-[#f8fafc]"

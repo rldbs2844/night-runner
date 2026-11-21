@@ -97,13 +97,14 @@ export default function InversionCharts({
     pad.top + plotH - (v / maxV) * plotH;
 
   // --- Chart 2 Geometry: Station Inversion Delta & 14h vs 22h ---
+  const W_BAR = Math.max(580, stationSummaries.length * 52);
   const maxBarY =
     Math.max(
       55,
       ...stationSummaries.flatMap((s) => [s.pm14, s.pm22])
     ) * 1.18;
   const barPad = { top: 30, right: 16, bottom: 56, left: 42 };
-  const barPlotW = W - barPad.left - barPad.right;
+  const barPlotW = W_BAR - barPad.left - barPad.right;
   const barPlotH = H - barPad.top - barPad.bottom;
   const groupW = barPlotW / Math.max(1, stationSummaries.length);
   const barW = Math.min(18, Math.max(8, groupW * 0.3));
@@ -247,7 +248,7 @@ export default function InversionCharts({
               />
 
               {/* X Axis Labels */}
-              {[0, 3, 6, 9, 12, 14, 18, 21, 22, 23].map((hr) => (
+              {[0, 3, 6, 9, 12, 14, 18, 22].map((hr) => (
                 <text
                   key={hr}
                   x={xHour(hr)}
@@ -415,14 +416,14 @@ export default function InversionCharts({
             </span>
           </div>
 
-          <div className="border border-[#e2e8f0] rounded-md bg-[#ffffff] p-1 overflow-hidden">
+          <div className="border border-[#e2e8f0] rounded-md bg-[#ffffff] p-1 overflow-x-auto">
             <svg
               ref={barSvgRef}
-              viewBox={`0 0 ${W} ${H}`}
-              className="w-full h-auto block"
+              viewBox={`0 0 ${W_BAR} ${H}`}
+              className="w-full min-w-[540px] h-auto block"
               aria-label="측정소별 역전폭 막대 그래프"
             >
-              <rect x="0" y="0" width={W} height={H} fill="#ffffff" />
+              <rect x="0" y="0" width={W_BAR} height={H} fill="#ffffff" />
 
               {[0, 15, 30, 45, 60].map((tick) => {
                 if (tick > maxBarY) return null;
@@ -432,7 +433,7 @@ export default function InversionCharts({
                     <line
                       x1={barPad.left}
                       y1={y}
-                      x2={W - barPad.right}
+                      x2={W_BAR - barPad.right}
                       y2={y}
                       stroke="#e2e8f0"
                       strokeDasharray="3 3"
@@ -458,14 +459,14 @@ export default function InversionCharts({
                     <line
                       x1={barPad.left}
                       y1={y35}
-                      x2={W - barPad.right}
+                      x2={W_BAR - barPad.right}
                       y2={y35}
                       stroke="#dc2626"
                       strokeDasharray="5 3"
                       opacity="0.6"
                     />
                     <text
-                      x={W - barPad.right}
+                      x={W_BAR - barPad.right}
                       y={y35 - 5}
                       textAnchor="end"
                       fontSize="10.5"

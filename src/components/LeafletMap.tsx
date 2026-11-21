@@ -232,6 +232,21 @@ export default function LeafletMap({
       });
 
       if (isSelected) {
+        let topPt = course.coordinates[0];
+        for (const pt of course.coordinates) {
+          if (pt[0] > topPt[0]) topPt = pt;
+        }
+        L.marker(topPt, {
+          interactive: false,
+          zIndexOffset: 500,
+          icon: L.divIcon({
+            className: "",
+            html: `<div class="km-marker-badge" style="border-color:${color};padding:3px 9px;font-size:11px;">${course.courseName} · ${course.pmAtHour.toFixed(1)} ㎍/㎥</div>`,
+            iconSize: [180, 24],
+            iconAnchor: [90, 34],
+          }),
+        }).addTo(group);
+
         const distMarkers = getDistanceMarkers(course.coordinates);
         distMarkers.forEach((dm, idx) => {
           const isEndpoint = idx === 0 || idx === distMarkers.length - 1;
@@ -247,9 +262,9 @@ export default function LeafletMap({
             interactive: false,
             icon: L.divIcon({
               className: "",
-              html: `<div class="km-marker-badge">${dm.label}</div>`,
-              iconSize: [42, 18],
-              iconAnchor: [-6, 9],
+              html: `<div class="km-marker-badge" style="border-color:${isEndpoint ? color : "#cbd5e1"};color:${isEndpoint ? color : "#0f172a"};">${dm.label}</div>`,
+              iconSize: [44, 18],
+              iconAnchor: [-10, 9],
             }),
           }).addTo(group);
         });
