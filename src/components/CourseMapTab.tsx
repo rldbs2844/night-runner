@@ -21,11 +21,22 @@ import {
 } from "@/lib/csvParser";
 import type { MapCourseItem, MapProvider } from "@/components/LeafletMap";
 
+type ExtendedMapProvider = MapProvider | "kakao";
+
 const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   ssr: false,
   loading: () => (
     <div className="w-full h-[450px] sm:h-[510px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
       지도를 불러오는 중입니다...
+    </div>
+  ),
+});
+
+const KakaoMap = dynamic(() => import("@/components/KakaoMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[450px] sm:h-[510px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
+      카카오맵을 불러오는 중입니다...
     </div>
   ),
 });
@@ -61,6 +72,7 @@ const STATUS_BADGE: Record<
   },
 };
 
+const ENV_KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY ?? "";
 const ENV_VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY ?? "";
 const ENV_MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_API_KEY ?? "";
 
@@ -103,15 +115,20 @@ export default function CourseMapTab({ stationSummaries }: CourseMapTabProps) {
   const [selectedRegionId, setSelectedRegionId] = useState<string>("dongducheon");
   const [selectedMode, setSelectedMode] = useState<"primary" | "detour">("primary");
 
-  const [storedProvider, setStoredProvider] = useStoredValue("nr_map_provider", "osm");
-  const mapProvider = storedProvider as MapProvider;
+  const [storedProvider, setStoredProvider] = useStoredValue(
+    "nr_map_provider",
+    ENV_KAKAO_KEY ? "kakao" : "osm"
+  );
+  const mapProvider = storedProvider as ExtendedMapProvider;
+  const [kakaoKey, setKakaoKey] = useStoredValue("nr_kakao_key", ENV_KAKAO_KEY);
   const [vworldKey, setVworldKey] = useStoredValue("nr_vworld_key", ENV_VWORLD_KEY);
   const [maptilerKey, setMaptilerKey] = useStoredValue("nr_maptiler_key", ENV_MAPTILER_KEY);
   const [showKeyPanel, setShowKeyPanel] = useState<boolean>(false);
 
-  const handleChangeProvider = (next: MapProvider) => {
+  const handleChangeProvider = (next: ExtendedMapProvider) => {
     setStoredProvider(next);
     if (
+      (next === "kakao" && !kakaoKey.trim()) ||
       ((next === "vworld-base" || next === "vworld-hybrid") &&
         !vworldKey.trim()) ||
       (next === "maptiler-positron" && !maptilerKey.trim())
@@ -120,7 +137,12 @@ export default function CourseMapTab({ stationSummaries }: CourseMapTabProps) {
     }
   };
 
-  const handleSaveKeys = (nextVworld: string, nextMaptiler: string) => {
+  const handleSaveKeys = (
+    nextKakao: string,
+    nextVworld: string,
+    nextMaptiler: string
+  ) => {
+    setKakaoKey(nextKakao.trim());
     setVworldKey(nextVworld.trim());
     setMaptilerKey(nextMaptiler.trim());
   };
@@ -274,9 +296,12 @@ ${trkpts}
   };
 
   const needsMissingKeyWarning =
+    (mapProvider === "kakao" && !kakaoKey.trim()) ||
     ((mapProvider === "vworld-base" || mapProvider === "vworld-hybrid") &&
       !vworldKey.trim()) ||
     (mapProvider === "maptiler-positron" && !maptilerKey.trim());
+
+  const useKakao = mapProvider === "kakao" && Boolean(kakaoKey.trim());
 
   return (
     <div className="space-y-4">
@@ -355,7 +380,7 @@ ${trkpts}
 
       {/* Main Split: Left Map + Right Inspection Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* Left: Leaflet Map & Map Engine Switcher */}
+        {/* Left: Leaflet / Kakao Map & Map Engine Switcher */}
         <div className="lg:col-span-7 bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-3 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <div className="text-xs font-semibold text-[#0f172a]">
@@ -366,14 +391,15 @@ ${trkpts}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-0.5 text-[11px]">
+              <div className="inline-flex flex-wrap rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-0.5 text-[11px]">
                 {(
                   [
+                    ["kakao", "카카오맵"],
                     ["osm", "기본(OSM)"],
                     ["vworld-base", "브이월드 일반"],
                     ["vworld-hybrid", "브이월드 위성"],
                     ["maptiler-positron", "MapTiler"],
-                  ] as [MapProvider, string][]
+                  ] as [ExtendedMapProvider, string][]
                 ).map(([key, label]) => (
                   <button
                     key={key}
@@ -416,16 +442,32 @@ ${trkpts}
                   닫기
                 </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <label className="space-y-1">
+                  <span className="block text-[11px] font-medium text-[#0f172a]">
+                    카카오맵 JavaScript 키 (권장)
+                  </span>
+                  <input
+                    type="text"
+                    value={kakaoKey}
+                    onChange={(e) =>
+                      handleSaveKeys(e.target.value, vworldKey, maptilerKey)
+                    }
+                    placeholder="카카오 JavaScript 앱 키 입력"
+                    className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
+                  />
+                </label>
                 <label className="space-y-1">
                   <span className="block text-[11px] text-[#475569]">
-                    국토교통부 브이월드(VWORLD) 인증키
+                    국토교통부 브이월드(VWORLD) 키
                   </span>
                   <input
                     type="text"
                     value={vworldKey}
-                    onChange={(e) => handleSaveKeys(e.target.value, maptilerKey)}
-                    placeholder="브이월드 오픈API 키 입력 (선택)"
+                    onChange={(e) =>
+                      handleSaveKeys(kakaoKey, e.target.value, maptilerKey)
+                    }
+                    placeholder="브이월드 인증키 입력 (선택)"
                     className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
                   />
                 </label>
@@ -436,14 +478,16 @@ ${trkpts}
                   <input
                     type="text"
                     value={maptilerKey}
-                    onChange={(e) => handleSaveKeys(vworldKey, e.target.value)}
+                    onChange={(e) =>
+                      handleSaveKeys(kakaoKey, vworldKey, e.target.value)
+                    }
                     placeholder="MapTiler API 키 입력 (선택)"
                     className="w-full px-2.5 py-1.5 rounded border border-[#e2e8f0] bg-[#ffffff] text-xs text-[#0f172a]"
                   />
                 </label>
               </div>
-              <p className="text-[11px] text-[#64748b]">
-                키가 입력되지 않은 상태에서는 무료 OpenStreetMap 기본 지도로 자동 표시됩니다. 입력한 키는 현재 브라우저(`localStorage`)에만 저장됩니다.
+              <p className="text-[11px] text-[#64748b] leading-relaxed">
+                카카오맵은 카카오 디벨로퍼스(developers.kakao.com)에서 무료 앱 생성 후 <strong>JavaScript 키</strong>를 입력하고, 플랫폼 Web 도메인에 현재 사이트 주소(예: <code className="font-mono">https://rldbs2844.github.io</code>)를 등록하면 즉시 고품질 한국 지도로 표시됩니다.
               </p>
             </div>
           )}
@@ -454,19 +498,33 @@ ${trkpts}
             </div>
           )}
 
-          <LeafletMap
-            regions={REGIONS}
-            courses={mapCourses}
-            selectedRegionId={selectedRegionId}
-            selectedMode={selectedMode}
-            mapProvider={mapProvider}
-            vworldKey={vworldKey}
-            maptilerKey={maptilerKey}
-            onSelectCourse={(regionId, mode) => {
-              setSelectedRegionId(regionId);
-              setSelectedMode(mode);
-            }}
-          />
+          {useKakao ? (
+            <KakaoMap
+              kakaoKey={kakaoKey}
+              regions={REGIONS}
+              courses={mapCourses}
+              selectedRegionId={selectedRegionId}
+              selectedMode={selectedMode}
+              onSelectCourse={(regionId, mode) => {
+                setSelectedRegionId(regionId);
+                setSelectedMode(mode);
+              }}
+            />
+          ) : (
+            <LeafletMap
+              regions={REGIONS}
+              courses={mapCourses}
+              selectedRegionId={selectedRegionId}
+              selectedMode={selectedMode}
+              mapProvider={mapProvider === "kakao" ? "osm" : mapProvider}
+              vworldKey={vworldKey}
+              maptilerKey={maptilerKey}
+              onSelectCourse={(regionId, mode) => {
+                setSelectedRegionId(regionId);
+                setSelectedMode(mode);
+              }}
+            />
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-[11px] text-[#64748b]">
