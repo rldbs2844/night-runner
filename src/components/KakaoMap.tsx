@@ -10,8 +10,8 @@ interface KakaoMapProps {
   regions: RegionConfig[];
   courses: MapCourseItem[];
   selectedRegionId: string;
-  selectedMode: "primary" | "detour";
-  onSelectCourse: (regionId: string, mode: "primary" | "detour") => void;
+  selectedCourseId: string;
+  onSelectCourse: (regionId: string, courseId: string) => void;
 }
 
 const STATUS_COLOR: Record<TrafficStatus, string> = {
@@ -68,7 +68,7 @@ export default function KakaoMap({
   regions,
   courses,
   selectedRegionId,
-  selectedMode,
+  selectedCourseId,
   onSelectCourse,
 }: KakaoMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -80,14 +80,15 @@ export default function KakaoMap({
   const [sdkReady, setSdkReady] = useState<boolean>(false);
   const [sdkError, setSdkError] = useState<string | null>(null);
 
-  // Load Kakao Maps SDK dynamically for the given JavaScript key
   useEffect(() => {
     const trimmed = kakaoKey.trim();
     if (!trimmed) return;
 
     let cancelled = false;
     const scriptId = "kakao-maps-sdk";
-    const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+    const existing = document.getElementById(
+      scriptId
+    ) as HTMLScriptElement | null;
 
     const initKakao = () => {
       if (cancelled || !window.kakao?.maps) return;
@@ -142,7 +143,7 @@ export default function KakaoMap({
       if (!cancelled) {
         setSdkReady(false);
         setSdkError(
-          "카카오맵 SDK를 불러오지 못했습니다. JavaScript 앱 키와 카카오 디벨로퍼스의 Web 플랫폼 도메인(예: https://rldbs2844.github.io) 등록 여부를 확인해 주세요."
+          "카카오맵 SDK를 불러오지 못했습니다. JavaScript 앱 키와 카카오 디벨로퍼스의 JavaScript SDK 도메인(예: https://rldbs2844.github.io) 등록 여부를 확인해 주세요."
         );
       }
     };
@@ -154,19 +155,16 @@ export default function KakaoMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kakaoKey]);
 
-  // Draw courses & overlays whenever data or selection updates
   useEffect(() => {
     const map = mapRef.current;
     const kakao = window.kakao?.maps;
     if (!sdkReady || !map || !kakao) return;
 
-    // Clear previous overlays & polylines
     objectsRef.current.forEach((obj) => obj.setMap(null));
     objectsRef.current = [];
 
     courses.forEach((course) => {
-      const isSelected =
-        course.regionId === selectedRegionId && course.mode === selectedMode;
+      const isSelected = course.courseId === selectedCourseId;
       const color = STATUS_COLOR[course.status];
       const path = course.coordinates.map(
         ([lat, lng]) => new kakao.LatLng(lat, lng)
@@ -186,15 +184,14 @@ export default function KakaoMap({
 
       const polyline = new kakao.Polyline({
         path,
-        strokeWeight: isSelected ? 5.5 : 3.5,
+        strokeWeight: isSelected ? 5.5 : 3.2,
         strokeColor: color,
-        strokeOpacity: isSelected ? 0.96 : 0.65,
-        strokeStyle:
-          course.mode === "detour" && !isSelected ? "shortdash" : "solid",
+        strokeOpacity: isSelected ? 0.96 : 0.62,
+        strokeStyle: !isSelected ? "shortdash" : "solid",
       });
       polyline.setMap(map);
       kakao.event.addListener(polyline, "click", () => {
-        onSelectCourse(course.regionId, course.mode);
+        onSelectCourse(course.regionId, course.courseId);
       });
       objectsRef.current.push(polyline);
 
@@ -217,22 +214,21 @@ export default function KakaoMap({
           overlay.setMap(map);
           objectsRef.current.push(overlay);
         });
-      } else {
+      } else if (course.regionId === selectedRegionId) {
+        // Show clean clickable course labels for sibling routes in the active region
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "km-marker-badge cursor-pointer";
         btn.style.borderColor = color;
-        btn.textContent =
-          course.mode === "detour" ? `[우회] ${course.courseName}` : course.courseName;
-        btn.onclick = () => onSelectCourse(course.regionId, course.mode);
+        btn.textContent = `${course.courseName} (${course.pmAtHour.toFixed(0)})`;
+        btn.onclick = () => onSelectCourse(course.regionId, course.courseId);
 
+        const midIdx = Math.floor(course.coordinates.length / 2);
+        const pt = course.coordinates[midIdx] ?? course.coordinates[0];
         const overlay = new kakao.CustomOverlay({
-          position: new kakao.LatLng(
-            course.coordinates[0][0],
-            course.coordinates[0][1]
-          ),
+          position: new kakao.LatLng(pt[0], pt[1]),
           content: btn,
-          yAnchor: 1.3,
+          yAnchor: 1.2,
           zIndex: 2,
         });
         overlay.setMap(map);
@@ -240,25 +236,25 @@ export default function KakaoMap({
       }
     });
 
-    const viewKey = `${selectedRegionId}:${selectedMode}`;
+    const viewKey = `${selectedRegionId}:${selectedCourseId}`;
     if (lastViewKeyRef.current !== viewKey) {
       lastViewKeyRef.current = viewKey;
       const activeCourse = courses.find(
-        (c) => c.regionId === selectedRegionId && c.mode === selectedMode
+        (c) => c.courseId === selectedCourseId
       );
       if (activeCourse && activeCourse.coordinates.length > 0) {
         const bounds = new kakao.LatLngBounds();
         activeCourse.coordinates.forEach(([lat, lng]) =>
           bounds.extend(new kakao.LatLng(lat, lng))
         );
-        map.setBounds(bounds, 60, 60, 60, 60);
+        map.setBounds(bounds, 65, 65, 65, 65);
       }
     }
-  }, [sdkReady, courses, selectedRegionId, selectedMode, onSelectCourse]);
+  }, [sdkReady, courses, selectedRegionId, selectedCourseId, onSelectCourse]);
 
   if (sdkError) {
     return (
-      <div className="w-full h-[450px] sm:h-[510px] rounded-lg border border-[#fecaca] bg-[#fef2f2] p-6 flex flex-col items-center justify-center text-center gap-2">
+      <div className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#fecaca] bg-[#fef2f2] p-6 flex flex-col items-center justify-center text-center gap-2">
         <p className="text-sm font-semibold text-[#b91c1c]">
           카카오맵 연결을 확인해 주세요
         </p>
@@ -272,7 +268,7 @@ export default function KakaoMap({
   return (
     <div
       ref={containerRef}
-      className="w-full h-[450px] sm:h-[510px] rounded-lg border border-[#e2e8f0] overflow-hidden bg-[#f8fafc]"
+      className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] overflow-hidden bg-[#f8fafc]"
       aria-label="카카오맵 야간 러닝 코스 지도"
     />
   );

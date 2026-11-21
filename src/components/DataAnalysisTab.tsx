@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Upload, Download, RotateCcw } from "lucide-react";
 import InversionCharts from "@/components/InversionCharts";
 import type { InversionPair, StationSummary } from "@/lib/csvParser";
+import type { RegressionModelMetrics } from "@/lib/inversionModel";
 
 interface DataAnalysisTabProps {
   fileName: string;
@@ -13,6 +14,7 @@ interface DataAnalysisTabProps {
   stationSummaries: StationSummary[];
   inversionPairs: InversionPair[];
   allPairs: InversionPair[];
+  modelMetrics: RegressionModelMetrics;
   uploadError: string | null;
   onUploadFile: (file: File) => void;
   onDownloadSample: () => void;
@@ -27,6 +29,7 @@ export default function DataAnalysisTab({
   stationSummaries,
   inversionPairs,
   allPairs,
+  modelMetrics,
   uploadError,
   onUploadFile,
   onDownloadSample,
@@ -53,7 +56,7 @@ export default function DataAnalysisTab({
             </span>
           </div>
           <p className="text-xs text-[#64748b]">
-            시간대별 대기오염 data.csv 파일을 업로드하면 UTF-8 / EUC-KR 인코딩을 자동 판별하여 코스 지도와 역전층 분석을 즉시 갱신합니다.
+            시간대별 대기오염 data.csv 파일을 업로드하면 UTF-8 / EUC-KR 인코딩을 자동 판별하여 코스 지도, 역전 회귀 모델, 차트를 즉시 갱신합니다.
           </p>
           {uploadError && (
             <p className="text-xs font-medium text-[#dc2626]">{uploadError}</p>
@@ -147,11 +150,26 @@ export default function DataAnalysisTab({
         </div>
 
         <div className="bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-3.5 space-y-1">
-          <div className="text-xs text-[#64748b]">추출 기준 조건식</div>
-          <div className="text-sm font-mono font-semibold text-[#0f172a] pt-1">
-            PM2.5(14시) &lt; PM2.5(22시)
+          <div className="text-xs text-[#64748b]">역전 예측 다중회귀 모델</div>
+          <div className="text-xl font-bold text-[#0f172a] tabular-nums">
+            R² {modelMetrics.rSquared.toFixed(2)}
+            <span className="text-xs font-normal text-[#64748b] ml-1.5">
+              (MAE {modelMetrics.mae.toFixed(1)} ㎍/㎥)
+            </span>
           </div>
-          <div className="text-xs text-[#64748b]">동일 측정소·날짜 페어링 판별</div>
+          <div className="text-xs text-[#475569] truncate">
+            표본 {modelMetrics.sampleCount}건 기반 실시간 학습 완료
+          </div>
+        </div>
+      </div>
+
+      {/* Fitted Regression Weights Strip */}
+      <div className="bg-[#ffffff] border border-[#e2e8f0] rounded-lg px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+        <div className="font-semibold text-[#0f172a]">
+          학습된 22시 PM2.5 예측식 (Ridge 다중선형회귀)
+        </div>
+        <div className="font-mono text-[11px] text-[#334155] tabular-nums">
+          PM2.5(22시) = {modelMetrics.weights.intercept} + ({modelMetrics.weights.pm14})×PM14 + ({modelMetrics.weights.afternoonSlope})×오후기울기 + ({modelMetrics.weights.windEvening})×풍속 + ({modelMetrics.weights.tempDrop})×기온하강폭
         </div>
       </div>
 

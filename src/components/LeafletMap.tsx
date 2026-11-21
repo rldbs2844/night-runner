@@ -14,12 +14,12 @@ export type MapProvider =
 export interface MapCourseItem {
   regionId: string;
   regionLabel: string;
-  mode: "primary" | "detour";
   courseId: string;
   courseName: string;
   distanceKm: number;
   pmAtHour: number;
   status: TrafficStatus;
+  isWindCorridor: boolean;
   coordinates: [number, number][];
 }
 
@@ -27,11 +27,11 @@ interface LeafletMapProps {
   regions: RegionConfig[];
   courses: MapCourseItem[];
   selectedRegionId: string;
-  selectedMode: "primary" | "detour";
+  selectedCourseId: string;
   mapProvider: MapProvider;
   vworldKey: string;
   maptilerKey: string;
-  onSelectCourse: (regionId: string, mode: "primary" | "detour") => void;
+  onSelectCourse: (regionId: string, courseId: string) => void;
 }
 
 const STATUS_COLOR: Record<TrafficStatus, string> = {
@@ -92,7 +92,7 @@ export default function LeafletMap({
   regions,
   courses,
   selectedRegionId,
-  selectedMode,
+  selectedCourseId,
   mapProvider,
   vworldKey,
   maptilerKey,
@@ -104,7 +104,6 @@ export default function LeafletMap({
   const courseGroupRef = useRef<L.LayerGroup | null>(null);
   const lastViewKeyRef = useRef<string>("");
 
-  // Initialize Leaflet map once
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -130,7 +129,6 @@ export default function LeafletMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Switch map tile provider cleanly
   useEffect(() => {
     const map = mapRef.current;
     const tileGroup = tileGroupRef.current;
@@ -192,7 +190,6 @@ export default function LeafletMap({
     }
   }, [mapProvider, vworldKey, maptilerKey]);
 
-  // Draw courses & kilometer markers
   useEffect(() => {
     const map = mapRef.current;
     const group = courseGroupRef.current;
@@ -201,8 +198,7 @@ export default function LeafletMap({
     group.clearLayers();
 
     courses.forEach((course) => {
-      const isSelected =
-        course.regionId === selectedRegionId && course.mode === selectedMode;
+      const isSelected = course.courseId === selectedCourseId;
       const color = STATUS_COLOR[course.status];
 
       if (isSelected) {
@@ -217,9 +213,9 @@ export default function LeafletMap({
 
       const line = L.polyline(course.coordinates, {
         color,
-        weight: isSelected ? 5.5 : 3.5,
-        opacity: isSelected ? 0.96 : 0.68,
-        dashArray: course.mode === "detour" && !isSelected ? "6 6" : undefined,
+        weight: isSelected ? 5.5 : 3.2,
+        opacity: isSelected ? 0.96 : 0.62,
+        dashArray: !isSelected ? "6 6" : undefined,
         lineCap: "round",
         lineJoin: "round",
       }).addTo(group);
@@ -232,11 +228,10 @@ export default function LeafletMap({
       );
 
       line.on("click", () => {
-        onSelectCourse(course.regionId, course.mode);
+        onSelectCourse(course.regionId, course.courseId);
       });
 
       if (isSelected) {
-        // Place 출발 / 1km / 2km... / 도착 markers along the active route
         const distMarkers = getDistanceMarkers(course.coordinates);
         distMarkers.forEach((dm, idx) => {
           const isEndpoint = idx === 0 || idx === distMarkers.length - 1;
@@ -269,20 +264,20 @@ export default function LeafletMap({
         }).addTo(group);
 
         marker.bindTooltip(
-          `${course.mode === "detour" ? "[우회] " : ""}${course.courseName}`,
+          `${course.courseName} (${course.pmAtHour.toFixed(1)} ㎍/㎥)`,
           { direction: "top", offset: [0, -6] }
         );
         marker.on("click", () => {
-          onSelectCourse(course.regionId, course.mode);
+          onSelectCourse(course.regionId, course.courseId);
         });
       }
     });
 
-    const viewKey = `${selectedRegionId}:${selectedMode}`;
+    const viewKey = `${selectedRegionId}:${selectedCourseId}`;
     if (lastViewKeyRef.current !== viewKey) {
       lastViewKeyRef.current = viewKey;
       const activeCourse = courses.find(
-        (c) => c.regionId === selectedRegionId && c.mode === selectedMode
+        (c) => c.courseId === selectedCourseId
       );
       if (activeCourse && activeCourse.coordinates.length > 0) {
         const bounds = L.latLngBounds(activeCourse.coordinates);
@@ -292,12 +287,12 @@ export default function LeafletMap({
         if (reg) map.setView(reg.center, reg.zoom, { animate: true });
       }
     }
-  }, [courses, regions, selectedRegionId, selectedMode, onSelectCourse]);
+  }, [courses, regions, selectedRegionId, selectedCourseId, onSelectCourse]);
 
   return (
     <div
       ref={containerRef}
-      className="w-full h-[450px] sm:h-[510px] rounded-lg border border-[#e2e8f0] overflow-hidden"
+      className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] overflow-hidden"
       aria-label="야간 러닝 코스 지도"
     />
   );

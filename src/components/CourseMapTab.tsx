@@ -12,13 +12,18 @@ import {
   KeyRound,
   Download,
   Mountain,
+  TrendingUp,
 } from "lucide-react";
-import { REGIONS, type RegionConfig } from "@/lib/courses";
+import { REGIONS, type CourseVariant } from "@/lib/courses";
 import {
   classifyCourseStatus,
   type StationSummary,
   type TrafficStatus,
 } from "@/lib/csvParser";
+import type {
+  RegressionModelMetrics,
+  StationPrediction,
+} from "@/lib/inversionModel";
 import type { MapCourseItem, MapProvider } from "@/components/LeafletMap";
 
 type ExtendedMapProvider = MapProvider | "kakao";
@@ -26,7 +31,7 @@ type ExtendedMapProvider = MapProvider | "kakao";
 const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[450px] sm:h-[510px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
+    <div className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
       지도를 불러오는 중입니다...
     </div>
   ),
@@ -35,7 +40,7 @@ const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
 const KakaoMap = dynamic(() => import("@/components/KakaoMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[450px] sm:h-[510px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
+    <div className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-center text-sm text-[#64748b]">
       카카오맵을 불러오는 중입니다...
     </div>
   ),
@@ -43,6 +48,8 @@ const KakaoMap = dynamic(() => import("@/components/KakaoMap"), {
 
 interface CourseMapTabProps {
   stationSummaries: StationSummary[];
+  modelMetrics: RegressionModelMetrics;
+  predictions: Map<string, StationPrediction>;
 }
 
 const STATUS_BADGE: Record<
@@ -89,7 +96,10 @@ function subscribeStorage(cb: () => void) {
 function notifyStorage() {
   storageListeners.forEach((cb) => cb());
 }
-function useStoredValue(key: string, fallback: string): [string, (val: string) => void] {
+function useStoredValue(
+  key: string,
+  fallback: string
+): [string, (val: string) => void] {
   const value = useSyncExternalStore(
     subscribeStorage,
     () => {
@@ -110,10 +120,17 @@ function useStoredValue(key: string, fallback: string): [string, (val: string) =
   return [value, setValue];
 }
 
-export default function CourseMapTab({ stationSummaries }: CourseMapTabProps) {
+export default function CourseMapTab({
+  stationSummaries,
+  modelMetrics,
+  predictions,
+}: CourseMapTabProps) {
   const [selectedHour, setSelectedHour] = useState<number>(22);
-  const [selectedRegionId, setSelectedRegionId] = useState<string>("dongducheon");
-  const [selectedMode, setSelectedMode] = useState<"primary" | "detour">("primary");
+  const [selectedRegionId, setSelectedRegionId] =
+    useState<string>("dongducheon");
+  const [selectedCourseId, setSelectedCourseId] = useState<string>(
+    "dongducheon-sincheon"
+  );
 
   const [storedProvider, setStoredProvider] = useStoredValue(
     "nr_map_provider",
@@ -121,8 +138,14 @@ export default function CourseMapTab({ stationSummaries }: CourseMapTabProps) {
   );
   const mapProvider = storedProvider as ExtendedMapProvider;
   const [kakaoKey, setKakaoKey] = useStoredValue("nr_kakao_key", ENV_KAKAO_KEY);
-  const [vworldKey, setVworldKey] = useStoredValue("nr_vworld_key", ENV_VWORLD_KEY);
-  const [maptilerKey, setMaptilerKey] = useStoredValue("nr_maptiler_key", ENV_MAPTILER_KEY);
+  const [vworldKey, setVworldKey] = useStoredValue(
+    "nr_vworld_key",
+    ENV_VWORLD_KEY
+  );
+  const [maptilerKey, setMaptilerKey] = useStoredValue(
+    "nr_maptiler_key",
+    ENV_MAPTILER_KEY
+  );
   const [showKeyPanel, setShowKeyPanel] = useState<boolean>(false);
 
   const handleChangeProvider = (next: ExtendedMapProvider) => {
@@ -156,30 +179,26 @@ export default function CourseMapTab({ stationSummaries }: CourseMapTabProps) {
   const regionMetrics = useMemo(() => {
     return REGIONS.map((region) => {
       const st = summaryMap.get(region.stationName);
+      const pred = predictions.get(region.stationName);
       const basePm14 = st?.pm14 ?? 21.0;
       const basePm22 = st?.pm22 ?? 21.0;
       const basePmAtHour = st?.hourlyPm25[selectedHour] ?? basePm22;
       const baseWindAtHour =
         st?.hourlyWind[selectedHour] ?? st?.wind22 ?? 1.2;
-      const baseWind22 = st?.wind22 ?? baseWindAtHour;
+      const basePred22 = pred?.predictedPm22 ?? basePm22;
 
-      const computeCourseStats = (
-        mode: "primary" | "detour",
-        variant: RegionConfig["primaryCourse"]
-      ) => {
+      const computedCourses = region.courses.map((variant: CourseVariant) => {
         const pm14 = Math.round(basePm14 * variant.exposureFactor * 10) / 10;
         const pm22 = Math.round(basePm22 * variant.exposureFactor * 10) / 10;
         const pmAtHour =
           Math.round(basePmAtHour * variant.exposureFactor * 10) / 10;
+        const predictedPm22 =
+          Math.round(basePred22 * variant.exposureFactor * 10) / 10;
         const diff = Math.round((pm22 - pm14) * 10) / 10;
-        const isInversion = mode === "detour" ? false : pm14 < pm22;
+        const isInversion = variant.isWindCorridor ? false : pm14 < pm22;
         const windAtHour =
           baseWindAtHour !== null
             ? Math.round(baseWindAtHour * variant.windFactor * 10) / 10
-            : null;
-        const wind22 =
-          baseWind22 !== null
-            ? Math.round(baseWind22 * variant.windFactor * 10) / 10
             : null;
         const status = classifyCourseStatus(
           pmAtHour,
@@ -201,53 +220,66 @@ export default function CourseMapTab({ stationSummaries }: CourseMapTabProps) {
           };
         });
 
+        const baseProb = pred?.inversionProbPct ?? (isInversion ? 85 : 15);
+        const courseInversionProb = variant.isWindCorridor
+          ? Math.max(4, Math.round(baseProb * variant.exposureFactor * 0.45))
+          : baseProb;
+
         return {
-          mode,
           variant,
           pm14,
           pm22,
           pmAtHour,
+          predictedPm22,
+          inversionProbPct: courseInversionProb,
           diff,
           isInversion,
           windAtHour,
-          wind22,
           status,
           cigaretteEq,
           eveningSeries,
         };
+      });
+
+      // Rank courses at the selected hour: safe first, then lowest PM2.5
+      const rankedCourses = [...computedCourses].sort((a, b) => {
+        const order = { safe: 0, caution: 1, danger: 2 };
+        if (order[a.status] !== order[b.status]) {
+          return order[a.status] - order[b.status];
+        }
+        return a.pmAtHour - b.pmAtHour;
+      });
+
+      // Region pill dot reflects worst status of default/first route in region
+      const primaryCourseStatus = computedCourses[0]?.status ?? "safe";
+
+      return {
+        region,
+        stationSummary: st,
+        stationPrediction: pred,
+        courses: computedCourses,
+        rankedCourses,
+        bestCourse: rankedCourses[0],
+        primaryCourseStatus,
       };
-
-      const primary = computeCourseStats("primary", region.primaryCourse);
-      const detour = computeCourseStats("detour", region.safeDetourCourse);
-
-      return { region, stationSummary: st, primary, detour };
     });
-  }, [summaryMap, selectedHour]);
+  }, [summaryMap, predictions, selectedHour]);
 
   const mapCourses: MapCourseItem[] = useMemo(() => {
     const items: MapCourseItem[] = [];
-    regionMetrics.forEach(({ region, primary, detour }) => {
-      items.push({
-        regionId: region.id,
-        regionLabel: region.label,
-        mode: "primary",
-        courseId: primary.variant.id,
-        courseName: primary.variant.name,
-        distanceKm: primary.variant.distanceKm,
-        pmAtHour: primary.pmAtHour,
-        status: primary.status,
-        coordinates: primary.variant.coordinates,
-      });
-      items.push({
-        regionId: region.id,
-        regionLabel: region.label,
-        mode: "detour",
-        courseId: detour.variant.id,
-        courseName: detour.variant.name,
-        distanceKm: detour.variant.distanceKm,
-        pmAtHour: detour.pmAtHour,
-        status: detour.status,
-        coordinates: detour.variant.coordinates,
+    regionMetrics.forEach(({ region, courses }) => {
+      courses.forEach((c) => {
+        items.push({
+          regionId: region.id,
+          regionLabel: region.label,
+          courseId: c.variant.id,
+          courseName: c.variant.name,
+          distanceKm: c.variant.distanceKm,
+          pmAtHour: c.pmAtHour,
+          status: c.status,
+          isWindCorridor: c.variant.isWindCorridor,
+          coordinates: c.variant.coordinates,
+        });
       });
     });
     return items;
@@ -257,14 +289,18 @@ export default function CourseMapTab({ stationSummaries }: CourseMapTabProps) {
     regionMetrics.find((m) => m.region.id === selectedRegionId) ??
     regionMetrics[0];
   const activeCourse =
-    selectedMode === "primary"
-      ? activeRegionMetric.primary
-      : activeRegionMetric.detour;
+    activeRegionMetric.courses.find(
+      (c) => c.variant.id === selectedCourseId
+    ) ?? activeRegionMetric.courses[0];
   const activeBadge = STATUS_BADGE[activeCourse.status];
+  const bestCourse = activeRegionMetric.bestCourse;
 
   const handleSelectRegion = (regionId: string) => {
     setSelectedRegionId(regionId);
-    setSelectedMode("primary");
+    const targetRegion = regionMetrics.find((m) => m.region.id === regionId);
+    if (targetRegion && targetRegion.courses[0]) {
+      setSelectedCourseId(targetRegion.courses[0].variant.id);
+    }
   };
 
   const handleDownloadGpx = () => {
@@ -351,12 +387,12 @@ ${trkpts}
           {/* 6 Region Buttons */}
           <div className="space-y-1.5">
             <div className="text-xs font-semibold text-[#475569]">
-              권역별 코스 선택
+              권역별 코스 선택 ({activeRegionMetric.courses.length}개 노선)
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {regionMetrics.map(({ region, primary }) => {
+              {regionMetrics.map(({ region, primaryCourseStatus }) => {
                 const isSelected = region.id === selectedRegionId;
-                const badge = STATUS_BADGE[primary.status];
+                const badge = STATUS_BADGE[primaryCourseStatus];
                 return (
                   <button
                     key={region.id}
@@ -380,7 +416,7 @@ ${trkpts}
 
       {/* Main Split: Left Map + Right Inspection Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* Left: Leaflet / Kakao Map & Map Engine Switcher */}
+        {/* Left: Map & Map Engine Switcher */}
         <div className="lg:col-span-7 bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-3 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <div className="text-xs font-semibold text-[#0f172a]">
@@ -427,7 +463,6 @@ ${trkpts}
             </div>
           </div>
 
-          {/* Optional API Key Panel */}
           {showKeyPanel && (
             <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-3 space-y-2.5 text-xs">
               <div className="flex items-center justify-between">
@@ -487,14 +522,14 @@ ${trkpts}
                 </label>
               </div>
               <p className="text-[11px] text-[#64748b] leading-relaxed">
-                카카오맵은 카카오 디벨로퍼스(developers.kakao.com)에서 무료 앱 생성 후 <strong>JavaScript 키</strong>를 입력하고, 플랫폼 Web 도메인에 현재 사이트 주소(예: <code className="font-mono">https://rldbs2844.github.io</code>)를 등록하면 즉시 고품질 한국 지도로 표시됩니다.
+                카카오 디벨로퍼스 앱의 <strong>JavaScript 키</strong>를 입력하고 Web 도메인을 등록하면 즉시 한국 정밀 지도로 전환됩니다.
               </p>
             </div>
           )}
 
           {needsMissingKeyWarning && (
             <div className="rounded-md border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] text-[#b45309]">
-              선택한 지도 엔진의 API 키가 아직 입력되지 않아 기본 OpenStreetMap 지도로 표시 중입니다. 위 입력란에 키를 넣으면 즉시 전환됩니다.
+              선택한 지도 엔진의 API 키가 아직 입력되지 않아 기본 OpenStreetMap 지도로 표시 중입니다.
             </div>
           )}
 
@@ -504,10 +539,10 @@ ${trkpts}
               regions={REGIONS}
               courses={mapCourses}
               selectedRegionId={selectedRegionId}
-              selectedMode={selectedMode}
-              onSelectCourse={(regionId, mode) => {
+              selectedCourseId={activeCourse.variant.id}
+              onSelectCourse={(regionId, courseId) => {
                 setSelectedRegionId(regionId);
-                setSelectedMode(mode);
+                setSelectedCourseId(courseId);
               }}
             />
           ) : (
@@ -515,20 +550,20 @@ ${trkpts}
               regions={REGIONS}
               courses={mapCourses}
               selectedRegionId={selectedRegionId}
-              selectedMode={selectedMode}
+              selectedCourseId={activeCourse.variant.id}
               mapProvider={mapProvider === "kakao" ? "osm" : mapProvider}
               vworldKey={vworldKey}
               maptilerKey={maptilerKey}
-              onSelectCourse={(regionId, mode) => {
+              onSelectCourse={(regionId, courseId) => {
                 setSelectedRegionId(regionId);
-                setSelectedMode(mode);
+                setSelectedCourseId(courseId);
               }}
             />
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-[11px] text-[#64748b]">
-              실선은 선택 코스(1km 거리 표식 포함), 점선은 비교 코스입니다.
+              실선은 선택 코스(1km 거리 표식 포함), 점선은 권역 내 대안 코스입니다.
             </p>
             <div className="flex items-center gap-3 text-xs text-[#475569]">
               <span className="inline-flex items-center gap-1">
@@ -547,46 +582,58 @@ ${trkpts}
           </div>
         </div>
 
-        {/* Right: Course Detail & Action Guidance */}
+        {/* Right: Ranked Courses + Selected Course Detail + Regression Prediction */}
         <div className="lg:col-span-5 bg-[#ffffff] border border-[#e2e8f0] rounded-lg p-4 space-y-4">
-          {/* Course Variant Switcher */}
-          <div className="grid grid-cols-2 gap-1.5 p-1 rounded-md bg-[#f8fafc] border border-[#e2e8f0]">
-            <button
-              type="button"
-              onClick={() => setSelectedMode("primary")}
-              className={`py-1.5 px-2.5 rounded text-xs font-medium transition flex items-center justify-center gap-1.5 ${
-                selectedMode === "primary"
-                  ? "bg-[#ffffff] text-[#0f172a] border border-[#e2e8f0] shadow-xs"
-                  : "text-[#64748b] hover:text-[#0f172a]"
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  STATUS_BADGE[activeRegionMetric.primary.status].dot
-                }`}
-              />
-              주 코스
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedMode("detour")}
-              className={`py-1.5 px-2.5 rounded text-xs font-medium transition flex items-center justify-center gap-1.5 ${
-                selectedMode === "detour"
-                  ? "bg-[#ffffff] text-[#0f172a] border border-[#e2e8f0] shadow-xs"
-                  : "text-[#64748b] hover:text-[#0f172a]"
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  STATUS_BADGE[activeRegionMetric.detour.status].dot
-                }`}
-              />
-              안전 우회 코스
-            </button>
+          {/* Dynamic Time-Based Ranked Course Selector */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-[#0f172a]">
+                {selectedHour}시 기준 {activeRegionMetric.region.label} 코스 추천 순위
+              </span>
+              <span className="text-[11px] text-[#64748b]">
+                안전 우선 정렬
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {activeRegionMetric.rankedCourses.map((c, idx) => {
+                const badge = STATUS_BADGE[c.status];
+                const isSel = c.variant.id === activeCourse.variant.id;
+                return (
+                  <button
+                    key={c.variant.id}
+                    type="button"
+                    onClick={() => setSelectedCourseId(c.variant.id)}
+                    className={`w-full px-3 py-2 rounded-md border text-left transition flex items-center justify-between gap-2 ${
+                      isSel
+                        ? "border-[#0f172a] bg-[#f8fafc]"
+                        : "border-[#e2e8f0] bg-[#ffffff] hover:bg-[#f8fafc]"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[11px] font-bold text-[#64748b] w-8 shrink-0">
+                        {idx + 1}순위
+                      </span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${badge.dot}`} />
+                      <span className="text-xs font-semibold text-[#0f172a] truncate">
+                        {c.variant.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 text-xs tabular-nums">
+                      <span className="text-[11px] text-[#64748b]">
+                        {c.variant.distanceKm.toFixed(1)}km
+                      </span>
+                      <span className={`font-bold ${badge.text}`}>
+                        {c.pmAtHour.toFixed(1)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Course Title, Elevation & Status Badge */}
-          <div className="flex items-start justify-between gap-3 pb-3 border-b border-[#e2e8f0]">
+          {/* Selected Course Header */}
+          <div className="flex items-start justify-between gap-3 pt-2 pb-3 border-t border-b border-[#e2e8f0]">
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2 text-xs text-[#64748b]">
                 <span>
@@ -613,7 +660,7 @@ ${trkpts}
             </span>
           </div>
 
-          {/* 14시 vs 22시 PM2.5 Comparison + Current Hour */}
+          {/* 14시 vs 22시 PM2.5 Comparison */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-[#475569]">
@@ -666,10 +713,10 @@ ${trkpts}
               </div>
             </div>
 
-            {/* Compact 14h~23h Mini Bar Strip */}
+            {/* 14h~23h Mini Bar Strip */}
             <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-2.5 py-2 space-y-1">
               <div className="flex justify-between text-[10px] text-[#64748b]">
-                <span>14시~23시 코스 농도 변화</span>
+                <span>14시~23시 코스 농도 변화 (막대 클릭 시 시각 이동)</span>
                 <span className="tabular-nums">기준선 35 ㎍/㎥</span>
               </div>
               <div className="grid grid-cols-10 gap-1 items-end h-10 pt-1">
@@ -692,7 +739,9 @@ ${trkpts}
                     >
                       <div
                         className={`w-full rounded-t-xs transition-all ${barColor} ${
-                          isCur ? "opacity-100 ring-1 ring-[#0f172a]" : "opacity-55 group-hover:opacity-85"
+                          isCur
+                            ? "opacity-100 ring-1 ring-[#0f172a]"
+                            : "opacity-55 group-hover:opacity-85"
                         }`}
                         style={{ height: `${pct}%` }}
                       />
@@ -715,6 +764,50 @@ ${trkpts}
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* Multiple Regression Inversion Prediction Card */}
+          <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-[#0f172a]">
+                <TrendingUp className="w-3.5 h-3.5 text-[#475569]" />
+                22시 야간 역전 예측 (다중회귀 모델)
+              </span>
+              <span className="text-[11px] text-[#64748b] tabular-nums">
+                오차 MAE {modelMetrics.mae.toFixed(1)} ㎍/㎥ · R²{" "}
+                {modelMetrics.rSquared.toFixed(2)}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded border border-[#e2e8f0] bg-[#ffffff] px-2.5 py-2">
+                <div className="text-[11px] text-[#64748b]">예상 22시 농도</div>
+                <div className="text-sm font-bold text-[#0f172a] tabular-nums">
+                  {activeCourse.predictedPm22.toFixed(1)} ㎍/㎥
+                </div>
+              </div>
+              <div className="rounded border border-[#e2e8f0] bg-[#ffffff] px-2.5 py-2">
+                <div className="text-[11px] text-[#64748b]">역전 발생 확률</div>
+                <div
+                  className={`text-sm font-bold tabular-nums ${
+                    activeCourse.inversionProbPct >= 60
+                      ? "text-[#dc2626]"
+                      : activeCourse.inversionProbPct >= 35
+                      ? "text-[#d97706]"
+                      : "text-[#16a34a]"
+                  }`}
+                >
+                  {activeCourse.inversionProbPct}%
+                </div>
+              </div>
+            </div>
+            {activeRegionMetric.stationPrediction && (
+              <p className="text-[11px] text-[#475569]">
+                주요 기여 요인:{" "}
+                <strong className="text-[#0f172a]">
+                  {activeRegionMetric.stationPrediction.topFactor}
+                </strong>
+              </p>
+            )}
           </div>
 
           {/* Wind Speed & Inversion Status */}
@@ -790,27 +883,28 @@ ${trkpts}
             </div>
             <p className="text-xs text-[#475569] leading-relaxed">
               {activeCourse.status === "danger"
-                ? `낮 14시(${activeCourse.pm14.toFixed(1)} ㎍/㎥) 대비 밤 22시(${activeCourse.pm22.toFixed(1)} ㎍/㎥) 농도가 상승하는 야간 역전 정체 구간입니다. 저지대 고강도 러닝을 중단하고 고도가 높은 우회 코스나 실내 운동으로 전환하시기 바랍니다.`
+                ? `낮 14시(${activeCourse.pm14.toFixed(1)} ㎍/㎥) 대비 밤 22시(${activeCourse.pm22.toFixed(1)} ㎍/㎥) 농도가 상승하는 야간 역전 정체 구간입니다. 저지대 고강도 러닝을 중단하고 1순위 안전 우회 코스나 실내 운동으로 전환하시기 바랍니다.`
                 : activeCourse.status === "caution"
-                ? `대기 확산이 다소 둔화되는 시간대입니다. 호흡량이 급격히 늘어나는 인터벌 주행은 자제하고, 30분 내외의 가벼운 조깅 또는 바람길 우회 코스를 이용하시기 바랍니다.`
+                ? `대기 확산이 다소 둔화되는 시간대입니다. 호흡량이 급격히 늘어나는 인터벌 주행은 자제하고, 30분 내외의 가벼운 조깅 또는 상위 추천 코스를 이용하시기 바랍니다.`
                 : `수평 환기 및 지형 순환이 유지되어 밤 시간대에도 초미세먼지 축적이 적은 구간입니다. 일반적인 야간 크루 러닝을 진행하기에 적합합니다.`}
             </p>
           </div>
 
-          {/* Direct Detour Button when Danger Course is Selected */}
-          {activeCourse.status === "danger" && selectedMode === "primary" && (
-            <button
-              type="button"
-              onClick={() => setSelectedMode("detour")}
-              className="w-full py-2.5 px-3 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] hover:bg-[#dcfce7] text-[#15803d] text-xs font-semibold flex items-center justify-between transition"
-            >
-              <span>
-                같은 권역 안전 우회 코스로 바로 이동 (
-                {activeRegionMetric.detour.variant.name})
-              </span>
-              <ArrowRight className="w-4 h-4 shrink-0" />
-            </button>
-          )}
+          {/* Direct Detour Button to #1 Best Course */}
+          {bestCourse &&
+            bestCourse.variant.id !== activeCourse.variant.id &&
+            activeCourse.status !== "safe" && (
+              <button
+                type="button"
+                onClick={() => setSelectedCourseId(bestCourse.variant.id)}
+                className="w-full py-2.5 px-3 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] hover:bg-[#dcfce7] text-[#15803d] text-xs font-semibold flex items-center justify-between transition"
+              >
+                <span>
+                  1순위 안전 추천 코스로 바로 이동 ({bestCourse.variant.name})
+                </span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
+              </button>
+            )}
         </div>
       </div>
     </div>

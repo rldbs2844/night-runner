@@ -11,6 +11,7 @@ import {
   parseCsvRecords,
   type AirRecord,
 } from "@/lib/csvParser";
+import { trainAndPredictInversion } from "@/lib/inversionModel";
 import { fetchLiveKoreanAirRecords } from "@/lib/liveWeatherApi";
 
 const DEFAULT_CSV_TEXT = generateDefaultCsvText();
@@ -28,6 +29,10 @@ export default function HomePage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const analysis = useMemo(() => analyzeRecords(records), [records]);
+  const regression = useMemo(
+    () => trainAndPredictInversion(records),
+    [records]
+  );
 
   const handleUploadFile = (file: File) => {
     const reader = new FileReader();
@@ -185,7 +190,11 @@ export default function HomePage() {
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5">
         {activeTab === "map" ? (
-          <CourseMapTab stationSummaries={analysis.stationSummaries} />
+          <CourseMapTab
+            stationSummaries={analysis.stationSummaries}
+            modelMetrics={regression.model}
+            predictions={regression.predictions}
+          />
         ) : (
           <DataAnalysisTab
             fileName={fileName}
@@ -195,6 +204,7 @@ export default function HomePage() {
             stationSummaries={analysis.stationSummaries}
             inversionPairs={analysis.inversionPairs}
             allPairs={analysis.allPairs}
+            modelMetrics={regression.model}
             uploadError={uploadError}
             onUploadFile={handleUploadFile}
             onDownloadSample={handleDownloadSample}
