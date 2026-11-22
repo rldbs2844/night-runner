@@ -6,10 +6,12 @@ import {
   ArrowLeftRight,
   ArrowRight,
   Clock,
+  Crosshair,
   Download,
   ChevronDown,
   ChevronUp,
   Loader2,
+  LocateFixed,
   MapPin,
   Navigation,
   RotateCcw,
@@ -25,11 +27,17 @@ import {
 import {
   analyzeCustomRoute,
   evaluateCustomRouteAtHour,
+  haversineKm,
   searchKoreanPlaces,
   type CustomRouteAnalysis,
   type PlaceSearchResult,
   type RoutePoint,
 } from "@/lib/customRouteAnalyzer";
+import {
+  computeBearingDeg,
+  computeRouteProgress,
+  type UserLocationState,
+} from "@/lib/geoTracker";
 import type {
   RegressionModelMetrics,
   StationPrediction,
@@ -140,6 +148,26 @@ export default function CourseMapTab({
   const [customAnalysis, setCustomAnalysis] =
     useState<CustomRouteAnalysis | null>(null);
   const customReqSeqRef = useRef<number>(0);
+
+  // Live GPS location & heading tracking state
+  const [gpsEnabled, setGpsEnabled] = useState<boolean>(false);
+  const [gpsLoading, setGpsLoading] = useState<boolean>(false);
+  const [followUser, setFollowUser] = useState<boolean>(false);
+  const [recenterTick, setRecenterTick] = useState<number>(0);
+  const [userLocation, setUserLocation] = useState<UserLocationState | null>(
+    null
+  );
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const prevGpsFixRef = useRef<[number, number] | null>(null);
+  const lastMovementHeadingRef = useRef<number | null>(null);
+  const compassHeadingRef = useRef<number | null>(null);
+  const orientationHandlerRef = useRef<((ev: DeviceOrientationEvent) => void) | null>(null);
+  const pendingStartFromGpsRef = useRef<boolean>(false);
+  const customEndRef = useRef<RoutePoint | null>(null);
+  useEffect(() => {
+    customEndRef.current = customEnd;
+  }, [customEnd]);
 
   // Never persist map mode in localStorage; start on Kakao Map when key exists, otherwise OSM
   const [mapProvider, setMapProvider] = useState<MapViewMode>(
@@ -555,6 +583,248 @@ ${trkpts}
     []
   );
 
+  const cleanupWatchers = useCallback(() => {
+    if (watchIdRef.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    if (orientationHandlerRef.current && typeof window !== "undefined") {
+      window.removeEventListener("deviceorientation", orientationHandlerRef.current);
+      orientationHandlerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cleanupWatchers, [cleanupWatchers]);
+
+  const stopGpsTracking = useCallback(() => {
+    cleanupWatchers();
+    pendingStartFromGpsRef.current = false;
+    prevGpsFixRef.current = null;
+    lastMovementHeadingRef.current = null;
+    setGpsEnabled(false);
+    setGpsLoading(false);
+    setFollowUser(false);
+    setUserLocation(null);
+    setGpsError(null);
+  }, [cleanupWatchers]);
+
+  const startGpsTracking = useCallback(
+    (useAsCustomStartOnFirstFix = false) => {
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        setGpsError("이 브라우저에서는 위치 추적(GPS)을 지원하지 않습니다.");
+        return;
+      }
+
+      if (useAsCustomStartOnFirstFix) {
+        pendingStartFromGpsRef.current = true;
+      }
+
+      // If already tracking, just recenter (or set custom start immediately if we have fix)
+      if (watchIdRef.current !== null) {
+        setFollowUser(true);
+        setRecenterTick((t) => t + 1);
+        return;
+      }
+
+      setGpsError(null);
+      setGpsEnabled(true);
+      setGpsLoading(true);
+      setFollowUser(true);
+
+      // Optional mobile compass heading listener
+      if (typeof window !== "undefined" && "DeviceOrientationEvent" in window) {
+        const DevOrient = window.DeviceOrientationEvent as unknown as {
+          requestPermission?: () => Promise<"granted" | "denied">;
+        };
+        const attachCompass = () => {
+          if (orientationHandlerRef.current) return;
+          const handler = (ev: DeviceOrientationEvent) => {
+            const iosHeading = (
+              ev as unknown as { webkitCompassHeading?: number }
+            ).webkitCompassHeading;
+            let deg: number | null = null;
+            if (typeof iosHeading === "number" && Number.isFinite(iosHeading)) {
+              deg = iosHeading;
+            } else if (typeof ev.alpha === "number" && Number.isFinite(ev.alpha)) {
+              deg = (360 - ev.alpha) % 360;
+            }
+            if (deg !== null) {
+              compassHeadingRef.current = Math.round(deg);
+              setUserLocation((prev) =>
+                prev && prev.speedMps !== null && prev.speedMps < 0.7
+                  ? { ...prev, headingDeg: Math.round(deg as number) }
+                  : prev && prev.headingDeg === null
+                  ? { ...prev, headingDeg: Math.round(deg as number) }
+                  : prev
+              );
+            }
+          };
+          orientationHandlerRef.current = handler;
+          window.addEventListener("deviceorientation", handler, true);
+        };
+
+        if (typeof DevOrient?.requestPermission === "function") {
+          DevOrient.requestPermission()
+            .then((res) => {
+              if (res === "granted") attachCompass();
+            })
+            .catch(() => {});
+        } else {
+          attachCompass();
+        }
+      }
+
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const lat = Math.round(pos.coords.latitude * 100000) / 100000;
+          const lon = Math.round(pos.coords.longitude * 100000) / 100000;
+          const accuracyM = Math.round(pos.coords.accuracy || 15);
+          const speedMps =
+            typeof pos.coords.speed === "number" &&
+            Number.isFinite(pos.coords.speed)
+              ? pos.coords.speed
+              : null;
+
+          const isFirstFix = prevGpsFixRef.current === null;
+
+          // Compute bearing if moved >= 4m and browser heading isn't present
+          let headingDeg: number | null =
+            typeof pos.coords.heading === "number" &&
+            Number.isFinite(pos.coords.heading) &&
+            pos.coords.heading >= 0
+              ? Math.round(pos.coords.heading)
+              : null;
+
+          if (headingDeg === null && prevGpsFixRef.current) {
+            const movedKm = haversineKm(prevGpsFixRef.current, [lat, lon]);
+            if (movedKm >= 0.004) {
+              const b = Math.round(
+                computeBearingDeg(prevGpsFixRef.current, [lat, lon])
+              );
+              lastMovementHeadingRef.current = b;
+              prevGpsFixRef.current = [lat, lon];
+            }
+          } else {
+            prevGpsFixRef.current = [lat, lon];
+          }
+
+          if (headingDeg === null) {
+            headingDeg =
+              lastMovementHeadingRef.current ?? compassHeadingRef.current;
+          }
+
+          const nextLoc: UserLocationState = {
+            lat,
+            lon,
+            accuracyM,
+            headingDeg,
+            speedMps,
+            timestamp: pos.timestamp,
+          };
+
+          setUserLocation(nextLoc);
+          setGpsLoading(false);
+          setGpsError(null);
+
+          if (isFirstFix) {
+            setRecenterTick((t) => t + 1);
+          }
+
+          if (pendingStartFromGpsRef.current) {
+            pendingStartFromGpsRef.current = false;
+            const startPt: RoutePoint = {
+              lat,
+              lon,
+              label: "내 현 위치",
+            };
+            setCustomStart(startPt);
+            setStartInput("내 현 위치");
+            if (customEndRef.current) {
+              runCustomAnalysis(startPt, customEndRef.current);
+            }
+          }
+        },
+        (err) => {
+          setGpsLoading(false);
+          if (err.code === 1) {
+            setGpsError(
+              "위치 권한이 차단되었습니다. 브라우저 주소창 왼쪽 자물쇠에서 위치 권한을 허용해 주세요."
+            );
+            stopGpsTracking();
+          } else if (err.code === 2) {
+            setGpsError(
+              "현재 위치 신호를 찾을 수 없습니다. 야외 또는 GPS가 켜진 환경에서 다시 시도해 주세요."
+            );
+          } else {
+            setGpsError(
+              "위치 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+            );
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 3000,
+          timeout: 12000,
+        }
+      );
+    },
+    [runCustomAnalysis, stopGpsTracking]
+  );
+
+  const handleToggleGps = () => {
+    if (gpsEnabled) {
+      stopGpsTracking();
+    } else {
+      startGpsTracking(false);
+    }
+  };
+
+  const handleRecenterGps = () => {
+    if (!gpsEnabled) {
+      startGpsTracking(false);
+      return;
+    }
+    setFollowUser(true);
+    setRecenterTick((t) => t + 1);
+  };
+
+  const handleUseGpsAsStart = () => {
+    if (userLocation) {
+      const startPt: RoutePoint = {
+        lat: userLocation.lat,
+        lon: userLocation.lon,
+        label: "내 현 위치",
+      };
+      setCustomStart(startPt);
+      setStartInput("내 현 위치");
+      setFollowUser(false);
+      if (customEnd) {
+        runCustomAnalysis(startPt, customEnd);
+      }
+      return;
+    }
+    startGpsTracking(true);
+  };
+
+  const handleUserPanMap = useCallback(() => {
+    setFollowUser(false);
+  }, []);
+
+  const activeRouteCoords = useMemo(() => {
+    if (routeMode === "custom") {
+      return customAnalysis?.coordinates ?? [];
+    }
+    return activeCourse.variant.coordinates;
+  }, [routeMode, customAnalysis, activeCourse]);
+
+  const routeProgress = useMemo(() => {
+    if (!userLocation || activeRouteCoords.length < 2) return null;
+    return computeRouteProgress(
+      [userLocation.lat, userLocation.lon],
+      activeRouteCoords
+    );
+  }, [userLocation, activeRouteCoords]);
+
   const useKakao = mapProvider === "kakao" && Boolean(ENV_KAKAO_KEY);
 
   return (
@@ -672,7 +942,7 @@ ${trkpts}
               <div className="space-y-2">
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                   {/* Start Input */}
-                  <div className="sm:col-span-5 flex items-center gap-1">
+                  <div className="sm:col-span-4 flex items-center gap-1">
                     <span className="w-2 h-2 rounded-full bg-[#16a34a] shrink-0" />
                     <input
                       type="text"
@@ -684,7 +954,7 @@ ${trkpts}
                           handlePlaceSearch("start");
                         }
                       }}
-                      placeholder="출발지 검색 또는 지도 클릭"
+                      placeholder="출발지 검색"
                       className="flex-1 min-w-0 rounded-md border border-[#cbd5e1] bg-[#ffffff] px-2.5 py-1.5 text-xs text-[#0f172a] placeholder:text-[#94a3b8] focus:outline-none focus:border-[#0f172a]"
                     />
                     <button
@@ -699,7 +969,7 @@ ${trkpts}
                   </div>
 
                   {/* End Input */}
-                  <div className="sm:col-span-5 flex items-center gap-1">
+                  <div className="sm:col-span-4 flex items-center gap-1">
                     <span className="w-2 h-2 rounded-full bg-[#dc2626] shrink-0" />
                     <input
                       type="text"
@@ -711,7 +981,7 @@ ${trkpts}
                           handlePlaceSearch("end");
                         }
                       }}
-                      placeholder="도착지 검색 또는 지도 클릭"
+                      placeholder="도착지 검색"
                       className="flex-1 min-w-0 rounded-md border border-[#cbd5e1] bg-[#ffffff] px-2.5 py-1.5 text-xs text-[#0f172a] placeholder:text-[#94a3b8] focus:outline-none focus:border-[#0f172a]"
                     />
                     <button
@@ -725,8 +995,17 @@ ${trkpts}
                     </button>
                   </div>
 
-                  {/* Swap / Reset Buttons */}
-                  <div className="sm:col-span-2 flex items-center justify-end gap-1">
+                  {/* GPS Start / Swap / Reset Buttons */}
+                  <div className="sm:col-span-4 flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      onClick={handleUseGpsAsStart}
+                      title="내 현 위치를 출발지로 설정"
+                      className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md border border-[#cbd5e1] bg-[#eff6ff] hover:bg-[#dbeafe] text-[#1d4ed8] text-[11px] font-semibold cursor-pointer whitespace-nowrap"
+                    >
+                      <LocateFixed className="w-3 h-3 shrink-0" />
+                      <span>현 위치</span>
+                    </button>
                     <button
                       type="button"
                       onClick={handleSwapCustomPoints}
@@ -849,6 +1128,23 @@ ${trkpts}
             </div>
           )}
 
+          {gpsError && (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-2 rounded-md border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-xs text-[#b91c1c]"
+            >
+              <span>{gpsError}</span>
+              <button
+                type="button"
+                onClick={() => setGpsError(null)}
+                aria-label="위치 알림 닫기"
+                className="shrink-0 p-0.5 rounded hover:bg-[#fee2e2]"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <div className="relative">
             {/* Fixed top-left badge */}
             {routeMode === "preset" ? (
@@ -902,6 +1198,48 @@ ${trkpts}
               </div>
             )}
 
+            {/* Naver-Map-Style Floating GPS Buttons (bottom-right) */}
+            <div className="absolute bottom-3 right-3 z-[450] flex flex-col items-end gap-1.5">
+              {gpsEnabled && userLocation && (
+                <button
+                  type="button"
+                  onClick={handleRecenterGps}
+                  title="내 위치로 지도 중심 맞추기"
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border shadow-sm text-[11px] font-semibold transition cursor-pointer ${
+                    followUser
+                      ? "bg-[#2563eb] text-[#ffffff] border-[#1d4ed8]"
+                      : "bg-[#ffffff]/95 text-[#0f172a] border-[#cbd5e1] hover:bg-[#f8fafc]"
+                  }`}
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  <span>{followUser ? "화면 고정 ON" : "내 위치로"}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleToggleGps}
+                title={gpsEnabled ? "실시간 위치 추적 끄기" : "내 위치 실시간 보기"}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border shadow-md text-xs font-semibold transition cursor-pointer ${
+                  gpsEnabled
+                    ? "bg-[#2563eb] text-[#ffffff] border-[#1d4ed8]"
+                    : "bg-[#ffffff]/95 text-[#0f172a] border-[#cbd5e1] hover:bg-[#f8fafc]"
+                }`}
+              >
+                {gpsLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <LocateFixed className="w-4 h-4" />
+                )}
+                <span>
+                  {gpsLoading
+                    ? "위치 탐색 중"
+                    : gpsEnabled
+                    ? "내 위치 ON"
+                    : "내 위치"}
+                </span>
+              </button>
+            </div>
+
             {useKakao ? (
               <KakaoMap
                 kakaoKey={ENV_KAKAO_KEY}
@@ -918,6 +1256,10 @@ ${trkpts}
                 customSegments={customMapSegments}
                 customRouteKey={customRouteKey}
                 onMapPickPoint={handleMapPickPoint}
+                userLocation={userLocation}
+                followUser={followUser}
+                recenterTick={recenterTick}
+                onUserPanMap={handleUserPanMap}
               />
             ) : (
               <LeafletMap
@@ -933,9 +1275,43 @@ ${trkpts}
                 customSegments={customMapSegments}
                 customRouteKey={customRouteKey}
                 onMapPickPoint={handleMapPickPoint}
+                userLocation={userLocation}
+                followUser={followUser}
+                recenterTick={recenterTick}
+                onUserPanMap={handleUserPanMap}
               />
             )}
           </div>
+
+          {/* Live GPS & Route Progress Bar */}
+          {gpsEnabled && userLocation && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#bfdbfe] bg-[#eff6ff] px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 text-[#1e3a8a]">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#2563eb] shrink-0" />
+                <span className="font-semibold">
+                  실시간 위치 표시 중 (±{userLocation.accuracyM}m)
+                </span>
+                {userLocation.headingDeg !== null && (
+                  <span className="text-[11px] text-[#1d4ed8] tabular-nums">
+                    · 방향 {userLocation.headingDeg}°
+                  </span>
+                )}
+              </div>
+              {routeProgress && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums border ${
+                    routeProgress.isOnRoute
+                      ? "bg-[#f0fdf4] text-[#15803d] border-[#bbf7d0]"
+                      : "bg-[#fffbeb] text-[#b45309] border-[#fde68a]"
+                  }`}
+                >
+                  {routeProgress.isOnRoute
+                    ? `경로 위 주행 · 남은 ${routeProgress.remainingKm.toFixed(1)}km (${routeProgress.progressPct}%)`
+                    : `경로에서 ${routeProgress.distanceToRouteM}m 떨어짐`}
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-[11px] text-[#64748b]">

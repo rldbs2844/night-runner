@@ -6,6 +6,10 @@ import type { RegionConfig } from "@/lib/courses";
 import type { TrafficStatus } from "@/lib/csvParser";
 
 import type { RoutePoint } from "@/lib/customRouteAnalyzer";
+import {
+  buildGpsMarkerHtml,
+  type UserLocationState,
+} from "@/lib/geoTracker";
 
 export type LeafletTileMode = "osm" | "satellite";
 
@@ -43,6 +47,10 @@ interface LeafletMapProps {
   customSegments?: CustomMapSegmentItem[];
   customRouteKey?: string;
   onMapPickPoint?: (lat: number, lon: number) => void;
+  userLocation?: UserLocationState | null;
+  followUser?: boolean;
+  recenterTick?: number;
+  onUserPanMap?: () => void;
 }
 
 const STATUS_COLOR: Record<TrafficStatus, string> = {
@@ -123,22 +131,30 @@ export default function LeafletMap({
   customSegments = [],
   customRouteKey = "",
   onMapPickPoint,
+  userLocation = null,
+  followUser = false,
+  recenterTick = 0,
+  onUserPanMap,
 }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileGroupRef = useRef<L.LayerGroup | null>(null);
   const courseGroupRef = useRef<L.LayerGroup | null>(null);
+  const gpsGroupRef = useRef<L.LayerGroup | null>(null);
   const lastViewKeyRef = useRef<string>("");
   const lastCustomViewKeyRef = useRef<string>("");
+  const lastRecenterTickRef = useRef<number>(0);
   const onSelectCourseRef = useRef(onSelectCourse);
   const onMapPickPointRef = useRef(onMapPickPoint);
+  const onUserPanMapRef = useRef(onUserPanMap);
   const routeModeRef = useRef(routeMode);
 
   useEffect(() => {
     onSelectCourseRef.current = onSelectCourse;
     onMapPickPointRef.current = onMapPickPoint;
+    onUserPanMapRef.current = onUserPanMap;
     routeModeRef.current = routeMode;
-  }, [onSelectCourse, onMapPickPoint, routeMode]);
+  }, [onSelectCourse, onMapPickPoint, onUserPanMap, routeMode]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -157,6 +173,7 @@ export default function LeafletMap({
 
     tileGroupRef.current = L.layerGroup().addTo(map);
     courseGroupRef.current = L.layerGroup().addTo(map);
+    gpsGroupRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
     map.on("click", (ev: L.LeafletMouseEvent) => {
@@ -168,11 +185,16 @@ export default function LeafletMap({
       }
     });
 
+    map.on("dragstart", () => {
+      onUserPanMapRef.current?.();
+    });
+
     return () => {
       map.remove();
       mapRef.current = null;
       tileGroupRef.current = null;
       courseGroupRef.current = null;
+      gpsGroupRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -436,6 +458,49 @@ export default function LeafletMap({
     customSegments,
     customRouteKey,
   ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const gpsGroup = gpsGroupRef.current;
+    if (!map || !gpsGroup) return;
+
+    gpsGroup.clearLayers();
+    if (!userLocation) return;
+
+    const clampedRadius = Math.max(8, Math.min(120, userLocation.accuracyM));
+    L.circle([userLocation.lat, userLocation.lon], {
+      radius: clampedRadius,
+      color: "#2563eb",
+      weight: 1,
+      opacity: 0.35,
+      fillColor: "#3b82f6",
+      fillOpacity: 0.12,
+      interactive: false,
+    }).addTo(gpsGroup);
+
+    L.marker([userLocation.lat, userLocation.lon], {
+      interactive: false,
+      zIndexOffset: 900,
+      icon: L.divIcon({
+        className: "",
+        html: buildGpsMarkerHtml(userLocation.headingDeg),
+        iconSize: [56, 56],
+        iconAnchor: [28, 28],
+      }),
+    }).addTo(gpsGroup);
+
+    const recenterRequested = recenterTick !== lastRecenterTickRef.current;
+    if (recenterRequested) {
+      lastRecenterTickRef.current = recenterTick;
+      map.setView(
+        [userLocation.lat, userLocation.lon],
+        Math.max(map.getZoom(), 15),
+        { animate: true }
+      );
+    } else if (followUser) {
+      map.panTo([userLocation.lat, userLocation.lon], { animate: true });
+    }
+  }, [userLocation, followUser, recenterTick]);
 
   const waitingForClick =
     routeMode === "custom" && (!customStart || !customEnd);

@@ -23,6 +23,16 @@ declare global {
           yAnchor?: number;
           zIndex?: number;
         }) => any;
+        Circle: new (options: {
+          center: any;
+          radius: number;
+          strokeWeight?: number;
+          strokeColor?: string;
+          strokeOpacity?: number;
+          strokeStyle?: string;
+          fillColor?: string;
+          fillOpacity?: number;
+        }) => any;
         ZoomControl: new () => any;
         MapTypeControl: new () => any;
         MapTypeId: {

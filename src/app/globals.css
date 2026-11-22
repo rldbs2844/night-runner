@@ -40,3 +40,61 @@ body {
 input[type="range"] {
   accent-color: #0f172a;
 }
+
+@keyframes gpsPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.75);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.9);
+    opacity: 0;
+  }
+}
+
+.gps-marker-wrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  pointer-events: none;
+}
+
+.gps-heading-cone {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: conic-gradient(
+    from -32deg at 50% 50%,
+    rgba(37, 99, 235, 0.42) 0deg,
+    rgba(37, 99, 235, 0.22) 32deg,
+    rgba(37, 99, 235, 0.42) 64deg,
+    transparent 65deg,
+    transparent 360deg
+  );
+  -webkit-mask-image: radial-gradient(circle, #000 18%, rgba(0, 0, 0, 0.5) 55%, transparent 72%);
+  mask-image: radial-gradient(circle, #000 18%, rgba(0, 0, 0, 0.5) 55%, transparent 72%);
+}
+
+.gps-pulse-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  background: rgba(37, 99, 235, 0.3);
+  animation: gpsPulse 2s ease-out infinite;
+}
+
+.gps-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  background: #2563eb;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+}

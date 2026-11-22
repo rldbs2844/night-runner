@@ -7,6 +7,10 @@ import type {
 } from "@/components/LeafletMap";
 import type { RegionConfig } from "@/lib/courses";
 import type { RoutePoint } from "@/lib/customRouteAnalyzer";
+import {
+  buildGpsMarkerHtml,
+  type UserLocationState,
+} from "@/lib/geoTracker";
 import type { TrafficStatus } from "@/lib/csvParser";
 
 interface KakaoMapProps {
@@ -24,6 +28,10 @@ interface KakaoMapProps {
   customSegments?: CustomMapSegmentItem[];
   customRouteKey?: string;
   onMapPickPoint?: (lat: number, lon: number) => void;
+  userLocation?: UserLocationState | null;
+  followUser?: boolean;
+  recenterTick?: number;
+  onUserPanMap?: () => void;
 }
 
 const STATUS_COLOR: Record<TrafficStatus, string> = {
@@ -97,24 +105,33 @@ export default function KakaoMap({
   customSegments = [],
   customRouteKey = "",
   onMapPickPoint,
+  userLocation = null,
+  followUser = false,
+  recenterTick = 0,
+  onUserPanMap,
 }: KakaoMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectsRef = useRef<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gpsObjectsRef = useRef<any[]>([]);
   const lastViewKeyRef = useRef<string>("");
   const lastCustomViewKeyRef = useRef<string>("");
+  const lastRecenterTickRef = useRef<number>(0);
   const onSelectCourseRef = useRef(onSelectCourse);
   const onFallbackRef = useRef(onFallback);
   const onMapPickPointRef = useRef(onMapPickPoint);
+  const onUserPanMapRef = useRef(onUserPanMap);
   const routeModeRef = useRef(routeMode);
   useEffect(() => {
     onSelectCourseRef.current = onSelectCourse;
     onFallbackRef.current = onFallback;
     onMapPickPointRef.current = onMapPickPoint;
+    onUserPanMapRef.current = onUserPanMap;
     routeModeRef.current = routeMode;
-  }, [onSelectCourse, onFallback, onMapPickPoint, routeMode]);
+  }, [onSelectCourse, onFallback, onMapPickPoint, onUserPanMap, routeMode]);
   const [sdkReady, setSdkReady] = useState<boolean>(false);
 
   useEffect(() => {
@@ -206,6 +223,9 @@ export default function KakaoMap({
                 }
               }
             );
+            window.kakao.maps.event.addListener(map, "dragstart", () => {
+              onUserPanMapRef.current?.();
+            });
             mapRef.current = map;
             lastViewKeyRef.current = "";
             settled = true;
@@ -510,6 +530,61 @@ export default function KakaoMap({
     customSegments,
     customRouteKey,
   ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const kakao = window.kakao?.maps;
+    if (!sdkReady || !map || !kakao) return;
+
+    try {
+      gpsObjectsRef.current.forEach((obj) => obj.setMap(null));
+      gpsObjectsRef.current = [];
+
+      if (!userLocation) return;
+
+      const pos = new kakao.LatLng(userLocation.lat, userLocation.lon);
+      const clampedRadius = Math.max(8, Math.min(120, userLocation.accuracyM));
+
+      if (kakao.Circle) {
+        const circle = new kakao.Circle({
+          center: pos,
+          radius: clampedRadius,
+          strokeWeight: 1,
+          strokeColor: "#2563eb",
+          strokeOpacity: 0.35,
+          strokeStyle: "solid",
+          fillColor: "#3b82f6",
+          fillOpacity: 0.12,
+        });
+        circle.setMap(map);
+        gpsObjectsRef.current.push(circle);
+      }
+
+      const gpsOverlay = new kakao.CustomOverlay({
+        position: pos,
+        content: buildGpsMarkerHtml(userLocation.headingDeg),
+        xAnchor: 0.5,
+        yAnchor: 0.5,
+        zIndex: 10,
+      });
+      gpsOverlay.setMap(map);
+      gpsObjectsRef.current.push(gpsOverlay);
+
+      const recenterRequested = recenterTick !== lastRecenterTickRef.current;
+      if (recenterRequested || followUser) {
+        if (recenterRequested) {
+          lastRecenterTickRef.current = recenterTick;
+        }
+        if (map.panTo) {
+          map.panTo(pos);
+        } else {
+          map.setCenter(pos);
+        }
+      }
+    } catch {
+      // Ignore transient GPS overlay error without dropping map
+    }
+  }, [sdkReady, userLocation, followUser, recenterTick]);
 
   const waitingForClick =
     routeMode === "custom" && (!customStart || !customEnd);
