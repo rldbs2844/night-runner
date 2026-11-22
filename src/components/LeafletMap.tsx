@@ -5,7 +5,18 @@ import L from "leaflet";
 import type { RegionConfig } from "@/lib/courses";
 import type { TrafficStatus } from "@/lib/csvParser";
 
+import type { RoutePoint } from "@/lib/customRouteAnalyzer";
+
 export type LeafletTileMode = "osm" | "satellite";
+
+export interface CustomMapSegmentItem {
+  index: number;
+  label: string;
+  pmAtHour: number;
+  status: TrafficStatus;
+  terrainNote: string;
+  coordinates: [number, number][];
+}
 
 export interface MapCourseItem {
   regionId: string;
@@ -21,11 +32,17 @@ export interface MapCourseItem {
 
 interface LeafletMapProps {
   tileMode?: LeafletTileMode;
+  routeMode?: "preset" | "custom";
   regions: RegionConfig[];
   courses: MapCourseItem[];
   selectedRegionId: string;
   selectedCourseId: string;
   onSelectCourse: (regionId: string, courseId: string) => void;
+  customStart?: RoutePoint | null;
+  customEnd?: RoutePoint | null;
+  customSegments?: CustomMapSegmentItem[];
+  customRouteKey?: string;
+  onMapPickPoint?: (lat: number, lon: number) => void;
 }
 
 const STATUS_COLOR: Record<TrafficStatus, string> = {
@@ -95,21 +112,33 @@ function getDistanceMarkers(
 
 export default function LeafletMap({
   tileMode = "osm",
+  routeMode = "preset",
   regions,
   courses,
   selectedRegionId,
   selectedCourseId,
   onSelectCourse,
+  customStart = null,
+  customEnd = null,
+  customSegments = [],
+  customRouteKey = "",
+  onMapPickPoint,
 }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileGroupRef = useRef<L.LayerGroup | null>(null);
   const courseGroupRef = useRef<L.LayerGroup | null>(null);
   const lastViewKeyRef = useRef<string>("");
+  const lastCustomViewKeyRef = useRef<string>("");
   const onSelectCourseRef = useRef(onSelectCourse);
+  const onMapPickPointRef = useRef(onMapPickPoint);
+  const routeModeRef = useRef(routeMode);
+
   useEffect(() => {
     onSelectCourseRef.current = onSelectCourse;
-  }, [onSelectCourse]);
+    onMapPickPointRef.current = onMapPickPoint;
+    routeModeRef.current = routeMode;
+  }, [onSelectCourse, onMapPickPoint, routeMode]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -129,6 +158,15 @@ export default function LeafletMap({
     tileGroupRef.current = L.layerGroup().addTo(map);
     courseGroupRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
+
+    map.on("click", (ev: L.LeafletMouseEvent) => {
+      if (routeModeRef.current === "custom" && onMapPickPointRef.current) {
+        onMapPickPointRef.current(
+          Math.round(ev.latlng.lat * 100000) / 100000,
+          Math.round(ev.latlng.lng * 100000) / 100000
+        );
+      }
+    });
 
     return () => {
       map.remove();
@@ -172,6 +210,122 @@ export default function LeafletMap({
     if (!map || !group) return;
 
     group.clearLayers();
+
+    if (routeMode === "custom") {
+      const fullCoords: [number, number][] = [];
+      customSegments.forEach((seg) => {
+        if (seg.coordinates.length < 2) return;
+        const color = STATUS_COLOR[seg.status];
+        L.polyline(seg.coordinates, {
+          color: "#ffffff",
+          weight: 9,
+          opacity: 0.92,
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(group);
+
+        const line = L.polyline(seg.coordinates, {
+          color,
+          weight: 5.5,
+          opacity: 0.96,
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(group);
+
+        line.bindTooltip(
+          `${seg.label} · ${seg.pmAtHour.toFixed(1)} ㎍/㎥ (${
+            STATUS_LABEL[seg.status]
+          }) · ${seg.terrainNote}`,
+          { sticky: true }
+        );
+        seg.coordinates.forEach((pt, idx) => {
+          if (idx === 0 && fullCoords.length > 0) return;
+          fullCoords.push(pt);
+        });
+      });
+
+      if (fullCoords.length >= 2) {
+        const kmMarkers = getDistanceMarkers(fullCoords).filter(
+          (m) => m.kind === "km"
+        );
+        kmMarkers.forEach((dm) => {
+          L.circleMarker(dm.point, {
+            radius: 4,
+            color: "#ffffff",
+            weight: 2,
+            fillColor: "#0f172a",
+            fillOpacity: 1,
+          }).addTo(group);
+          L.marker(dm.point, {
+            interactive: false,
+            icon: L.divIcon({
+              className: "",
+              html: `<div class="km-marker-badge" style="border-color:#cbd5e1;color:#0f172a;">${dm.label}</div>`,
+              iconSize: [44, 18],
+              iconAnchor: [-10, 9],
+            }),
+          }).addTo(group);
+        });
+      }
+
+      if (customStart) {
+        L.circleMarker([customStart.lat, customStart.lon], {
+          radius: 7,
+          color: "#ffffff",
+          weight: 2.5,
+          fillColor: "#16a34a",
+          fillOpacity: 1,
+        }).addTo(group);
+        L.marker([customStart.lat, customStart.lon], {
+          interactive: false,
+          zIndexOffset: 600,
+          icon: L.divIcon({
+            className: "",
+            html: `<div class="km-marker-badge" style="display:inline-block;transform:translate(-50%,calc(-100% - 10px));border-color:#16a34a;color:#15803d;">출발</div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          }),
+        }).addTo(group);
+      }
+
+      if (customEnd) {
+        L.circleMarker([customEnd.lat, customEnd.lon], {
+          radius: 7,
+          color: "#ffffff",
+          weight: 2.5,
+          fillColor: "#dc2626",
+          fillOpacity: 1,
+        }).addTo(group);
+        L.marker([customEnd.lat, customEnd.lon], {
+          interactive: false,
+          zIndexOffset: 600,
+          icon: L.divIcon({
+            className: "",
+            html: `<div class="km-marker-badge" style="display:inline-block;transform:translate(-50%,10px);border-color:#dc2626;color:#b91c1c;">도착</div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          }),
+        }).addTo(group);
+      }
+
+      if (customRouteKey && lastCustomViewKeyRef.current !== customRouteKey) {
+        lastCustomViewKeyRef.current = customRouteKey;
+        if (fullCoords.length >= 2) {
+          const bounds = L.latLngBounds(fullCoords);
+          map.fitBounds(bounds, {
+            paddingTopLeft: [110, 90],
+            paddingBottomRight: [110, 80],
+            maxZoom: 15,
+            animate: true,
+          });
+        } else if (customStart && !customEnd) {
+          map.panTo([customStart.lat, customStart.lon], { animate: true });
+        }
+      }
+      return;
+    }
+
+    lastCustomViewKeyRef.current = "";
 
     courses.forEach((course) => {
       const isSelected = course.courseId === selectedCourseId;
@@ -271,12 +425,27 @@ export default function LeafletMap({
         if (reg) map.setView(reg.center, reg.zoom, { animate: true });
       }
     }
-  }, [courses, regions, selectedRegionId, selectedCourseId]);
+  }, [
+    routeMode,
+    courses,
+    regions,
+    selectedRegionId,
+    selectedCourseId,
+    customStart,
+    customEnd,
+    customSegments,
+    customRouteKey,
+  ]);
+
+  const waitingForClick =
+    routeMode === "custom" && (!customStart || !customEnd);
 
   return (
     <div
       ref={containerRef}
-      className="w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] overflow-hidden"
+      className={`w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] overflow-hidden ${
+        waitingForClick ? "cursor-crosshair" : ""
+      }`}
       aria-label="야간 러닝 코스 지도"
     />
   );

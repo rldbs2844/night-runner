@@ -1,19 +1,29 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { MapCourseItem } from "@/components/LeafletMap";
+import type {
+  CustomMapSegmentItem,
+  MapCourseItem,
+} from "@/components/LeafletMap";
 import type { RegionConfig } from "@/lib/courses";
+import type { RoutePoint } from "@/lib/customRouteAnalyzer";
 import type { TrafficStatus } from "@/lib/csvParser";
 
 interface KakaoMapProps {
   kakaoKey: string;
   mapType?: "roadmap" | "skyview";
+  routeMode?: "preset" | "custom";
   regions: RegionConfig[];
   courses: MapCourseItem[];
   selectedRegionId: string;
   selectedCourseId: string;
   onSelectCourse: (regionId: string, courseId: string) => void;
   onFallback: (reason: string) => void;
+  customStart?: RoutePoint | null;
+  customEnd?: RoutePoint | null;
+  customSegments?: CustomMapSegmentItem[];
+  customRouteKey?: string;
+  onMapPickPoint?: (lat: number, lon: number) => void;
 }
 
 const STATUS_COLOR: Record<TrafficStatus, string> = {
@@ -75,12 +85,18 @@ function getDistanceMarkers(
 export default function KakaoMap({
   kakaoKey,
   mapType = "roadmap",
+  routeMode = "preset",
   regions,
   courses,
   selectedRegionId,
   selectedCourseId,
   onSelectCourse,
   onFallback,
+  customStart = null,
+  customEnd = null,
+  customSegments = [],
+  customRouteKey = "",
+  onMapPickPoint,
 }: KakaoMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,12 +104,17 @@ export default function KakaoMap({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectsRef = useRef<any[]>([]);
   const lastViewKeyRef = useRef<string>("");
+  const lastCustomViewKeyRef = useRef<string>("");
   const onSelectCourseRef = useRef(onSelectCourse);
   const onFallbackRef = useRef(onFallback);
+  const onMapPickPointRef = useRef(onMapPickPoint);
+  const routeModeRef = useRef(routeMode);
   useEffect(() => {
     onSelectCourseRef.current = onSelectCourse;
     onFallbackRef.current = onFallback;
-  }, [onSelectCourse, onFallback]);
+    onMapPickPointRef.current = onMapPickPoint;
+    routeModeRef.current = routeMode;
+  }, [onSelectCourse, onFallback, onMapPickPoint, routeMode]);
   const [sdkReady, setSdkReady] = useState<boolean>(false);
 
   useEffect(() => {
@@ -165,6 +186,25 @@ export default function KakaoMap({
             map.addControl(
               new window.kakao.maps.ZoomControl(),
               window.kakao.maps.ControlPosition.RIGHT
+            );
+            window.kakao.maps.event.addListener(
+              map,
+              "click",
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (mouseEvent?: any) => {
+                if (
+                  routeModeRef.current === "custom" &&
+                  onMapPickPointRef.current &&
+                  mouseEvent?.latLng
+                ) {
+                  const lat = mouseEvent.latLng.getLat();
+                  const lon = mouseEvent.latLng.getLng();
+                  onMapPickPointRef.current(
+                    Math.round(lat * 100000) / 100000,
+                    Math.round(lon * 100000) / 100000
+                  );
+                }
+              }
             );
             mapRef.current = map;
             lastViewKeyRef.current = "";
@@ -241,6 +281,113 @@ export default function KakaoMap({
     try {
       objectsRef.current.forEach((obj) => obj.setMap(null));
       objectsRef.current = [];
+
+      if (routeMode === "custom") {
+        const fullCoords: [number, number][] = [];
+        customSegments.forEach((seg) => {
+          if (seg.coordinates.length < 2) return;
+          const color = STATUS_COLOR[seg.status];
+          const path = seg.coordinates.map(
+            ([lat, lng]) => new kakao.LatLng(lat, lng)
+          );
+          const halo = new kakao.Polyline({
+            path,
+            strokeWeight: 9,
+            strokeColor: "#ffffff",
+            strokeOpacity: 0.92,
+            strokeStyle: "solid",
+          });
+          halo.setMap(map);
+          objectsRef.current.push(halo);
+
+          const polyline = new kakao.Polyline({
+            path,
+            strokeWeight: 5.5,
+            strokeColor: color,
+            strokeOpacity: 0.96,
+            strokeStyle: "solid",
+          });
+          polyline.setMap(map);
+          objectsRef.current.push(polyline);
+
+          seg.coordinates.forEach((pt, idx) => {
+            if (idx === 0 && fullCoords.length > 0) return;
+            fullCoords.push(pt);
+          });
+        });
+
+        if (fullCoords.length >= 2) {
+          const kmMarkers = getDistanceMarkers(fullCoords).filter(
+            (m) => m.kind === "km"
+          );
+          kmMarkers.forEach((dm) => {
+            const badge = document.createElement("div");
+            badge.className = "km-marker-badge";
+            badge.style.borderColor = "#cbd5e1";
+            badge.style.color = "#0f172a";
+            badge.textContent = dm.label;
+            const overlay = new kakao.CustomOverlay({
+              position: new kakao.LatLng(dm.point[0], dm.point[1]),
+              content: badge,
+              xAnchor: -0.25,
+              yAnchor: 0.5,
+              zIndex: 4,
+            });
+            overlay.setMap(map);
+            objectsRef.current.push(overlay);
+          });
+        }
+
+        if (customStart) {
+          const startBadge = document.createElement("div");
+          startBadge.className = "km-marker-badge";
+          startBadge.style.borderColor = "#16a34a";
+          startBadge.style.color = "#15803d";
+          startBadge.textContent = "출발";
+          const startOverlay = new kakao.CustomOverlay({
+            position: new kakao.LatLng(customStart.lat, customStart.lon),
+            content: startBadge,
+            xAnchor: 0.5,
+            yAnchor: 1.45,
+            zIndex: 6,
+          });
+          startOverlay.setMap(map);
+          objectsRef.current.push(startOverlay);
+        }
+
+        if (customEnd) {
+          const endBadge = document.createElement("div");
+          endBadge.className = "km-marker-badge";
+          endBadge.style.borderColor = "#dc2626";
+          endBadge.style.color = "#b91c1c";
+          endBadge.textContent = "도착";
+          const endOverlay = new kakao.CustomOverlay({
+            position: new kakao.LatLng(customEnd.lat, customEnd.lon),
+            content: endBadge,
+            xAnchor: 0.5,
+            yAnchor: -0.45,
+            zIndex: 6,
+          });
+          endOverlay.setMap(map);
+          objectsRef.current.push(endOverlay);
+        }
+
+        if (customRouteKey && lastCustomViewKeyRef.current !== customRouteKey) {
+          lastCustomViewKeyRef.current = customRouteKey;
+          if (fullCoords.length >= 2) {
+            const bounds = new kakao.LatLngBounds();
+            fullCoords.forEach(([lat, lng]) =>
+              bounds.extend(new kakao.LatLng(lat, lng))
+            );
+            map.setBounds(bounds, 95, 110, 80, 110);
+          } else if (customStart && !customEnd) {
+            map.setCenter(new kakao.LatLng(customStart.lat, customStart.lon));
+          }
+        }
+        return;
+      }
+
+      lastCustomViewKeyRef.current = "";
 
       // Single reusable hover tooltip for unselected courses
       const hoverEl = document.createElement("div");
@@ -352,13 +499,26 @@ export default function KakaoMap({
         "카카오맵 경로 표시 중 오류가 발생하여 기본 지도로 전환했습니다."
       );
     }
-  }, [sdkReady, courses, selectedRegionId, selectedCourseId]);
+  }, [
+    sdkReady,
+    routeMode,
+    courses,
+    selectedRegionId,
+    selectedCourseId,
+    customStart,
+    customEnd,
+    customSegments,
+    customRouteKey,
+  ]);
+
+  const waitingForClick =
+    routeMode === "custom" && (!customStart || !customEnd);
 
   return (
     <div className="relative w-full h-[460px] sm:h-[530px] rounded-lg border border-[#e2e8f0] overflow-hidden bg-[#f8fafc]">
       <div
         ref={containerRef}
-        className="w-full h-full"
+        className={`w-full h-full ${waitingForClick ? "cursor-crosshair" : ""}`}
         aria-label="카카오맵 야간 러닝 코스 지도"
       />
       {!sdkReady && (
