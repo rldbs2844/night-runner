@@ -690,12 +690,22 @@ ${trkpts}
                   )})에 미세먼지가 갇히는 정체 구간입니다. 아래 1순위 안전 코스로 이동하세요.`
                 : activeCourse.status === "caution"
                 ? `공기 순환이 다소 느린 구간입니다. 30분 내외 가벼운 조깅이나 1순위 코스를 권장합니다.`
+                : selectedHour < 19 && activeCourse.isInversion
+                ? `현재(${selectedHour}시) 주간 공기 순환으로 양호하나, 밤 22시(${activeCourse.pm22.toFixed(
+                    0
+                  )})에는 역전층 정체가 예상되므로 야간에는 1순위 바람길 코스를 권장합니다.`
+                : activeCourse.isInversion && activeCourse.diff > 0
+                ? `현재(${selectedHour}시) 미세먼지는 보통 수준이나 야간 역전 경향(낮 ${activeCourse.pm14.toFixed(
+                    0
+                  )} → 밤 ${activeCourse.pm22.toFixed(
+                    0
+                  )})이 있어 1순위 바람길 코스가 더 안전합니다.`
                 : `바람 순환이 유지되어 밤에도 공기가 깨끗합니다. 나이트 러닝하기 좋은 코스입니다.`}
             </div>
 
             {bestCourse &&
               bestCourse.variant.id !== activeCourse.variant.id &&
-              activeCourse.status !== "safe" && (
+              (activeCourse.status !== "safe" || activeCourse.isInversion) && (
                 <button
                   type="button"
                   onClick={() => setSelectedCourseId(bestCourse.variant.id)}

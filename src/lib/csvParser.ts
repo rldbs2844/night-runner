@@ -52,7 +52,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.3,
       wind_night: 0.5,
       temp_day: 13.5,
-      temp_night: 2.5,
+      temp_night: 3.5,
       daily_factor: [1.05, 0.92, 1.15, 1.25, 1.1, 0.88, 1.22],
     },
     의정부: {
@@ -61,7 +61,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.4,
       wind_night: 0.6,
       temp_day: 13.8,
-      temp_night: 3.2,
+      temp_night: 4.2,
       daily_factor: [1.02, 0.94, 1.14, 1.2, 1.06, 0.9, 1.18],
     },
     춘천: {
@@ -70,7 +70,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.1,
       wind_night: 0.6,
       temp_day: 12.8,
-      temp_night: 1.8,
+      temp_night: 2.8,
       daily_factor: [0.98, 1.08, 1.2, 1.12, 0.95, 1.05, 1.18],
     },
     대구: {
@@ -79,7 +79,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.4,
       wind_night: 0.8,
       temp_day: 16.0,
-      temp_night: 5.5,
+      temp_night: 6.5,
       daily_factor: [1.02, 0.96, 1.12, 1.08, 0.9, 1.14, 1.1],
     },
     성남: {
@@ -88,7 +88,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.2,
       wind_night: 0.8,
       temp_day: 14.0,
-      temp_night: 4.2,
+      temp_night: 5.2,
       daily_factor: [1.0, 0.96, 1.1, 1.16, 0.95, 1.04, 1.12],
     },
     수원: {
@@ -97,7 +97,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.3,
       wind_night: 0.9,
       temp_day: 14.2,
-      temp_night: 4.8,
+      temp_night: 5.8,
       daily_factor: [1.0, 0.95, 1.1, 1.14, 0.92, 1.06, 1.08],
     },
     고양: {
@@ -106,7 +106,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.7,
       wind_night: 1.4,
       temp_day: 14.1,
-      temp_night: 5.8,
+      temp_night: 6.5,
       daily_factor: [0.97, 1.04, 0.95, 1.1, 0.96, 1.02, 1.04],
     },
     광주: {
@@ -115,7 +115,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.7,
       wind_night: 1.4,
       temp_day: 16.2,
-      temp_night: 7.2,
+      temp_night: 7.5,
       daily_factor: [0.96, 1.08, 0.94, 1.12, 0.9, 1.05, 1.04],
     },
     대전: {
@@ -124,7 +124,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.6,
       wind_night: 1.5,
       temp_day: 15.0,
-      temp_night: 6.2,
+      temp_night: 6.8,
       daily_factor: [0.95, 1.12, 0.88, 1.05, 1.15, 0.92, 1.02],
     },
     서울잠실: {
@@ -133,7 +133,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.6,
       wind_night: 1.6,
       temp_day: 14.6,
-      temp_night: 6.8,
+      temp_night: 7.2,
       daily_factor: [0.96, 1.02, 0.94, 1.12, 0.98, 1.04, 1.0],
     },
     서울: {
@@ -142,7 +142,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 2.8,
       wind_night: 2.1,
       temp_day: 14.5,
-      temp_night: 7.0,
+      temp_night: 7.5,
       daily_factor: [0.96, 1.04, 0.92, 1.08, 0.95, 1.02, 0.98],
     },
     인천: {
@@ -151,7 +151,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 3.5,
       wind_night: 2.9,
       temp_day: 14.0,
-      temp_night: 8.2,
+      temp_night: 8.5,
       daily_factor: [0.95, 1.02, 0.92, 1.04, 0.96, 0.94, 0.98],
     },
     부산: {
@@ -169,7 +169,7 @@ export function generateDefaultCsvText(): string {
       wind_day: 4.5,
       wind_night: 4.1,
       temp_day: 18.0,
-      temp_night: 13.0,
+      temp_night: 12.8,
       daily_factor: [0.92, 0.98, 0.88, 1.02, 0.94, 0.9, 0.96],
     },
   };
@@ -183,6 +183,8 @@ export function generateDefaultCsvText(): string {
 
     for (const [stName, cfg] of Object.entries(stations)) {
       const df = cfg.daily_factor[dIdx];
+      const windGustDay = 0.65 * Math.sin(dIdx * 1.9 + stName.length * 0.7);
+      const coolVar = 1.4 * Math.cos(dIdx * 1.3 + stName.charCodeAt(0) * 0.1);
       const seoulEvent = stName === "서울" && dIdx === 3 ? 7.5 : 0.0;
       const daejeonEvent =
         stName === "대전" ? (dIdx === 1 || dIdx === 4 ? 6.0 : -3.5) : 0.0;
@@ -193,8 +195,10 @@ export function generateDefaultCsvText(): string {
         const nightCurve =
           Math.exp(-((hour - 22) ** 2) / 10.0) +
           0.55 * Math.exp(-((hour - 2) ** 2) / 12.0);
+        const windEffect = hour >= 18 ? -4.2 * windGustDay * nightCurve : 0;
+        const coolingTrap = hour >= 18 ? 1.15 * coolVar * nightCurve : 0;
         const boost = cfg.inversion_boost + seoulEvent + daejeonEvent;
-        const ripple = 1.2 * Math.sin(dIdx * 1.7 + hour * 0.6 + stName.length);
+        const ripple = 0.8 * Math.sin(dIdx * 1.7 + hour * 0.6 + stName.length);
 
         let pm25 =
           boost >= 0
@@ -202,8 +206,15 @@ export function generateDefaultCsvText(): string {
               morningRush +
               dayMixing +
               boost * df * nightCurve +
+              windEffect +
+              coolingTrap +
               ripple
-            : cfg.base_day * df + morningRush + boost * nightCurve + ripple;
+            : cfg.base_day * df +
+              morningRush +
+              boost * nightCurve +
+              windEffect +
+              coolingTrap +
+              ripple;
 
         pm25 = Math.max(6.0, Math.round(pm25 * 10) / 10);
         const pm10 = Math.round((pm25 * 1.65 + 4.5) * 10) / 10;
@@ -215,13 +226,15 @@ export function generateDefaultCsvText(): string {
               0.2,
               cfg.wind_night +
                 (cfg.wind_day - cfg.wind_night) * windT +
-                0.15 * Math.sin(dIdx + hour)
+                windGustDay * (1 - windT * 0.5) +
+                0.1 * Math.sin(dIdx + hour)
             ) * 10
           ) / 10;
         const temp =
           Math.round(
-            (cfg.temp_night +
-              (cfg.temp_day - cfg.temp_night) * windT +
+            (cfg.temp_night -
+              coolVar * (1 - windT) +
+              (cfg.temp_day - (cfg.temp_night - coolVar)) * windT +
               0.4 * Math.cos(dIdx)) *
               10
           ) / 10;

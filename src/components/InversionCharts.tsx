@@ -126,6 +126,15 @@ export default function InversionCharts({
   const groupW = barPlotW / Math.max(1, stationSummaries.length);
   const barW = Math.min(18, Math.max(8, groupW * 0.3));
 
+  const buildYGridTicks = (maxV: number): number[] => {
+    const step = maxV <= 75 ? 15 : maxV <= 130 ? 25 : 50;
+    const ticks: number[] = [];
+    for (let t = 0; t <= maxV; t += step) ticks.push(t);
+    return ticks;
+  };
+  const trendTicks = buildYGridTicks(maxTrendY);
+  const barTicks = buildYGridTicks(maxBarY);
+
   return (
     <div className="space-y-4">
       {/* Export Toolbar */}
@@ -219,8 +228,7 @@ export default function InversionCharts({
               </text>
 
               {/* Y Grid */}
-              {[0, 15, 30, 45, 60].map((tick) => {
-                if (tick > maxTrendY) return null;
+              {trendTicks.map((tick) => {
                 const y = yVal(tick, maxTrendY);
                 return (
                   <g key={tick}>
@@ -442,8 +450,7 @@ export default function InversionCharts({
             >
               <rect x="0" y="0" width={W_BAR} height={H} fill="#ffffff" />
 
-              {[0, 15, 30, 45, 60].map((tick) => {
-                if (tick > maxBarY) return null;
+              {barTicks.map((tick) => {
                 const y = barPad.top + barPlotH - (tick / maxBarY) * barPlotH;
                 return (
                   <g key={tick}>
