@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
 
+const isGitHubPages =
+  process.env.GITHUB_ACTIONS === "true" && process.env.CF_PAGES !== "1";
+
 const nextConfig: NextConfig = {
   output: "export",
-  basePath: "/night-runner",
+  ...(isGitHubPages ? { basePath: "/night-runner" } : {}),
   images: {
     unoptimized: true,
   },
